@@ -95,15 +95,19 @@ start_ccr() {
     run_as_pentester bash -lc "ccr stop >/tmp/ccr-stop.log 2>&1 || true"
     run_as_pentester bash -lc "nohup ccr start > '${CCR_LOG_FILE}' 2>&1 &"
 
-    # Wait for CCR to be ready
-    sleep 3
-
-    # Check if CCR is running by testing the port
-    if nc -z 127.0.0.1 3456 2>/dev/null; then
-        echo -e "${GREEN}CCR daemon running on port 3456${NC}"
-    else
-        echo -e "${YELLOW}Warning: CCR may not have started properly. Check ${CCR_LOG_FILE}${NC}"
-    fi
+    # Wait for CCR to be ready. A fixed short sleep is unreliable on slower
+    # hosts (cold Node.js startup can take a few seconds), so poll instead.
+    local waited=0
+    local timeout=20
+    while ! nc -z 127.0.0.1 3456 2>/dev/null; do
+        if [ "$waited" -ge "$timeout" ]; then
+            echo -e "${YELLOW}Warning: CCR may not have started properly. Check ${CCR_LOG_FILE}${NC}"
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    echo -e "${GREEN}CCR daemon running on port 3456${NC}"
 }
 
 setup_ccr() {
@@ -191,10 +195,14 @@ PY
 
     chown pentester:pentester "$CCR_CONFIG_FILE"
     ensure_ccr_activation
-    start_ccr
 
-    echo -e "${GREEN}CCR activated with ${mode} backend${NC}"
-    echo -e "${BLUE}Default model: ${display_model}${NC}"
+    if start_ccr; then
+        echo -e "${GREEN}CCR activated with ${mode} backend${NC}"
+        echo -e "${BLUE}Default model: ${display_model}${NC}"
+    else
+        echo -e "${YELLOW}CCR did not come up with ${mode} backend; it may still finish starting in the background.${NC}"
+        echo -e "${BLUE}Intended model: ${display_model}${NC}"
+    fi
 }
 
 ensure_permissions
