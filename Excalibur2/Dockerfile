@@ -30,6 +30,8 @@ RUN apt-get update && \
     wget \
     git \
     sudo \
+    gosu \
+    openssh-server \
     # Network utilities
     net-tools \
     dnsutils \
@@ -118,6 +120,12 @@ RUN useradd -m -s /bin/bash pentester && \
     usermod -aG sudo pentester && \
     echo "pentester ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
+# Configure SSH for local access to the pentester account.
+RUN mkdir -p /run/sshd && \
+    sed -ri 's/^#?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -ri 's/^#?PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config && \
+    grep -q '^AllowUsers pentester' /etc/ssh/sshd_config || echo 'AllowUsers pentester' >> /etc/ssh/sshd_config
+
 # Set up working directories (including ccr config)
 RUN mkdir -p /workspace /app /home/pentester/.claude /home/pentester/.claude-code-router && \
     chown -R pentester:pentester /workspace /app /home/pentester/.claude /home/pentester/.claude-code-router
@@ -146,12 +154,14 @@ RUN poetry config virtualenvs.create false && \
     poetry install --only main && \
     chmod +x /home/pentester/entrypoint.sh
 
-# Switch back to pentester user for runtime
-USER pentester
+# Run entrypoint as root so it can start sshd, then drop to pentester.
+USER root
 
 # Set environment variables
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+
+EXPOSE 22 8080
 
 # Default working directory for penetration tests
 WORKDIR /workspace

@@ -12,20 +12,16 @@ services:
       - claude-config:/home/pentester/.claude
       # Persist CCR configuration
       - ccr-config:/home/pentester/.claude-code-router
-    ports:
-      # SSH and web config UI are bound to localhost on the host.
-      - "127.0.0.1:${EXCALIBUR_SSH_PORT:-2222}:22"
-      - "127.0.0.1:${EXCALIBUR_WEB_PORT:-8080}:8080"
-    stdin_open: true
-    tty: true
     # Required for OpenVPN (HackTheBox/TryHackMe connectivity)
     cap_add:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
-    # Use host network for easy access to benchmark containers
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    # Shares the host's network namespace/routing table directly (no NAT/bridge),
+    # so outbound traffic follows the host's own routes/policy rules (e.g. multi-interface setups).
+    network_mode: host
+    stdin_open: true
+    tty: true
     # Resource allocation - adjust based on your system
     # More CPUs and memory improve performance for complex tasks
     deploy:
@@ -45,9 +41,17 @@ services:
       - EXCALIBUR_AUTH_MODE=${EXCALIBUR_AUTH_MODE:-manual}
       # Local SSH access. Override or use EXCALIBUR_SSH_AUTHORIZED_KEYS for keys.
       - EXCALIBUR_SSH_PASSWORD=${EXCALIBUR_SSH_PASSWORD:-excalibur}
-      # Web UI listens inside the container; Compose binds it to localhost above.
+      # With host networking there's no port remap, so sshd binds directly to this
+      # port on the VM. Defaults to 2222 (not 22) to avoid clashing with the host's
+      # own sshd.
+      - EXCALIBUR_SSH_PORT=${EXCALIBUR_SSH_PORT:-2222}
+      # Web UI listens inside the container; with host networking there's no Compose
+      # port mapping, so this is the actual bind address on the VM. 0.0.0.0 means the
+      # web UI is reachable from any interface (no localhost-only protection like the
+      # bridge compose file provides) -- set to 127.0.0.1 to restrict it, e.g. behind
+      # an SSH tunnel.
       - EXCALIBUR_WEB_HOST=${EXCALIBUR_WEB_HOST:-0.0.0.0}
-      - EXCALIBUR_WEB_PORT=8080
+      - EXCALIBUR_WEB_PORT=${EXCALIBUR_WEB_PORT:-8080}
       - EXCALIBUR_CCR_LOG=/tmp/ccr.log
       - EXCALIBUR_ACTIVITY_LOG=/workspace/excalibur-activity.log
       - EXCALIBUR_RUNTIME_CONFIG=/workspace/excalibur.yml

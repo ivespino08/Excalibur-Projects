@@ -16,6 +16,7 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="${PROJECT_DIR}/.env.auth"
+WEB_PORT="${EXCALIBUR_WEB_PORT:-8080}"
 
 echo -e "${PURPLE}"
 cat << "EOF"
@@ -120,12 +121,15 @@ EOF
         echo ""
         echo -e "${BLUE}Setup Instructions:${NC}"
         echo "  1. Start your local LLM server (e.g., LM Studio) on your host machine"
-        echo "     Default expected URL: http://localhost:1234/v1/chat/completions"
+        echo "     Default expected URL from the container: http://host.docker.internal:1234/v1/chat/completions"
         echo ""
-        echo "  2. To customize models or URL, edit:"
-        echo "     scripts/ccr-config-template.json"
+        echo "  2. Run 'make start' and open:"
+        echo "     http://127.0.0.1:${WEB_PORT}"
         echo ""
-        echo "  3. Run 'make connect' to start Excalibur"
+        echo "  3. Save your local model routing in the web UI"
+        echo ""
+        echo "  4. Run 'make connect' and then:"
+        echo "     excalibur --target 10.10.11.234"
         ;;
 
     *)
@@ -136,4 +140,4 @@ esac
 
 echo ""
 echo -e "${GREEN}Configuration complete!${NC}"
-echo -e "Run ${PURPLE}make connect${NC} to start Excalibur."
+echo -e "Run ${PURPLE}make start${NC}, configure at ${PURPLE}http://127.0.0.1:${WEB_PORT}${NC} if needed, then run ${PURPLE}make connect${NC}."

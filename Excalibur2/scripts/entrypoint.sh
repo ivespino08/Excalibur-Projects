@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
 # Excalibur Container Entrypoint
-# Sets up authentication based on EXCALIBUR_AUTH_MODE environment variable
+# Starts SSH, the web config UI, and authentication based on EXCALIBUR_AUTH_MODE.
 
 set -e
 
 AUTH_MODE="${EXCALIBUR_AUTH_MODE:-manual}"
 CCR_CONFIG_DIR="/home/pentester/.claude-code-router"
 CCR_CONFIG_FILE="${CCR_CONFIG_DIR}/config.json"
-BASHRC_FILE="/home/pentester/.bashrc"
+CCR_TEMPLATE_FILE="/app/scripts/ccr-config-template.json"
+CCR_LOG_FILE="${EXCALIBUR_CCR_LOG:-/tmp/ccr.log}"
+RUNTIME_CONFIG_FILE="${EXCALIBUR_RUNTIME_CONFIG:-/workspace/excalibur.yml}"
+SSH_PASSWORD="${EXCALIBUR_SSH_PASSWORD:-excalibur}"
+SSH_PORT="${EXCALIBUR_SSH_PORT:-22}"
+WEB_HOST="${EXCALIBUR_WEB_HOST:-0.0.0.0}"
+WEB_PORT="${EXCALIBUR_WEB_PORT:-8080}"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -17,69 +23,183 @@ NC='\033[0m'
 
 # Router configurations for different modes
 OPENROUTER_ROUTER='{"default":"openrouter,openai/gpt-5.1","background":"openrouter,openai/gpt-5.1","think":"openrouter,openai/gpt-5.1","longContext":"openrouter,openai/gpt-5.1","longContextThreshold":60000,"webSearch":"openrouter,google/gemini-3-pro-preview"}'
-LOCAL_ROUTER='{"default":"localLLM,openai/gpt-oss-20b","background":"localLLM,openai/gpt-oss-20b","think":"localLLM,qwen/qwen3-coder-30b","longContext":"localLLM,qwen/qwen3-coder-30b","longContextThreshold":60000,"webSearch":"localLLM,openai/gpt-oss-20b"}'
 
-setup_ccr() {
-    local mode="$1"
-    local api_key="$2"
-    local template_file="/app/scripts/ccr-config-template.json"
+run_as_pentester() {
+    gosu pentester "$@"
+}
 
-    # Create CCR config directory if needed
-    mkdir -p "$CCR_CONFIG_DIR"
+ensure_permissions() {
+    mkdir -p /workspace "$CCR_CONFIG_DIR" /home/pentester/.claude /home/pentester/.ssh
+    if [ ! -f /home/pentester/.claude.json ]; then
+        echo '{}' > /home/pentester/.claude.json
+    fi
+    chown -R pentester:pentester /workspace "$CCR_CONFIG_DIR" /home/pentester/.claude /home/pentester/.ssh
+    chown pentester:pentester /home/pentester/.claude.json
+    chmod 700 /home/pentester/.ssh
+    chmod 600 /home/pentester/.claude.json
+}
 
-    # Check if template exists
-    if [ ! -f "$template_file" ]; then
-        echo -e "${YELLOW}Error: CCR config template not found at $template_file${NC}"
-        exit 1
+ensure_ccr_activation() {
+    run_as_pentester python3 - <<'PY'
+from pathlib import Path
+
+from excalibur.server.web_config import ensure_bashrc_activation
+
+ensure_bashrc_activation(Path("/home/pentester/.bashrc"))
+PY
+}
+
+start_ssh() {
+    mkdir -p /run/sshd
+    ssh-keygen -A >/dev/null 2>&1 || true
+
+    if [ -n "$EXCALIBUR_SSH_AUTHORIZED_KEYS" ]; then
+        printf '%s\n' "$EXCALIBUR_SSH_AUTHORIZED_KEYS" > /home/pentester/.ssh/authorized_keys
+        chown pentester:pentester /home/pentester/.ssh/authorized_keys
+        chmod 600 /home/pentester/.ssh/authorized_keys
     fi
 
-    # Copy template and substitute placeholders
-    cp "$template_file" "$CCR_CONFIG_FILE"
-
-    # Substitute API key (for openrouter mode)
-    if [ -n "$api_key" ]; then
-        sed -i "s/__OPENROUTER_API_KEY__/${api_key}/g" "$CCR_CONFIG_FILE"
+    if [ -n "$SSH_PASSWORD" ]; then
+        echo "pentester:${SSH_PASSWORD}" | chpasswd
     fi
 
-    # Substitute Router config based on mode (use | as delimiter to avoid conflicts with /)
-    if [ "$mode" = "openrouter" ]; then
-        sed -i "s|\"__ROUTER_CONFIG__\"|${OPENROUTER_ROUTER}|g" "$CCR_CONFIG_FILE"
-        local display_model="openai/gpt-5.1"
-    else
-        sed -i "s|\"__ROUTER_CONFIG__\"|${LOCAL_ROUTER}|g" "$CCR_CONFIG_FILE"
-        local display_model="localLLM (qwen/qwen3-coder-30b, openai/gpt-oss-20b)"
+    if ! pgrep -x sshd >/dev/null 2>&1; then
+        echo -e "${BLUE}Starting SSH on port ${SSH_PORT}...${NC}"
+        /usr/sbin/sshd -o "Port=${SSH_PORT}"
+    fi
+}
+
+start_web_config() {
+    if [ "${EXCALIBUR_WEB_ENABLED:-true}" != "true" ]; then
+        return
     fi
 
+    if pgrep -f "excalibur.server.web_config" >/dev/null 2>&1; then
+        return
+    fi
+
+    echo -e "${BLUE}Starting config UI on port ${WEB_PORT}...${NC}"
+    run_as_pentester env \
+        EXCALIBUR_WEB_HOST="$WEB_HOST" \
+        EXCALIBUR_WEB_PORT="$WEB_PORT" \
+        EXCALIBUR_CCR_CONFIG="$CCR_CONFIG_FILE" \
+        EXCALIBUR_CCR_TEMPLATE="$CCR_TEMPLATE_FILE" \
+        EXCALIBUR_CCR_LOG="$CCR_LOG_FILE" \
+        EXCALIBUR_RUNTIME_CONFIG="$RUNTIME_CONFIG_FILE" \
+        nohup python3 -m excalibur.server.web_config > /tmp/excalibur-web.log 2>&1 &
+}
+
+start_ccr() {
     echo -e "${BLUE}Starting Claude Code Router...${NC}"
 
-    # Start CCR daemon (nohup to keep it running)
-    nohup ccr start > /tmp/ccr.log 2>&1 &
+    run_as_pentester bash -lc "ccr stop >/tmp/ccr-stop.log 2>&1 || true"
+    run_as_pentester bash -lc "nohup ccr start > '${CCR_LOG_FILE}' 2>&1 &"
 
     # Wait for CCR to be ready
-    sleep 2
+    sleep 3
 
     # Check if CCR is running by testing the port
     if nc -z 127.0.0.1 3456 2>/dev/null; then
         echo -e "${GREEN}CCR daemon running on port 3456${NC}"
     else
-        echo -e "${YELLOW}Warning: CCR may not have started properly. Check /tmp/ccr.log${NC}"
+        echo -e "${YELLOW}Warning: CCR may not have started properly. Check ${CCR_LOG_FILE}${NC}"
+    fi
+}
+
+setup_ccr() {
+    local mode="$1"
+    local api_key="$2"
+
+    # Create CCR config directory if needed
+    mkdir -p "$CCR_CONFIG_DIR"
+
+    # Check if template exists
+    if [ ! -f "$CCR_TEMPLATE_FILE" ]; then
+        echo -e "${YELLOW}Error: CCR config template not found at $CCR_TEMPLATE_FILE${NC}"
+        exit 1
     fi
 
-    # Add CCR activation to .bashrc so it persists in interactive shells
-    # Remove any existing ccr activation lines first
-    sed -i '/# CCR activation/d' "$BASHRC_FILE" 2>/dev/null || true
-    sed -i '/eval "$(ccr activate)"/d' "$BASHRC_FILE" 2>/dev/null || true
+    if [ "$mode" = "openrouter" ]; then
+        # Copy template and substitute placeholders for OpenRouter mode.
+        cp "$CCR_TEMPLATE_FILE" "$CCR_CONFIG_FILE"
+        if [ -n "$api_key" ]; then
+            sed -i "s/__OPENROUTER_API_KEY__/${api_key}/g" "$CCR_CONFIG_FILE"
+        fi
+        sed -i "s|\"__ROUTER_CONFIG__\"|${OPENROUTER_ROUTER}|g" "$CCR_CONFIG_FILE"
+        local display_model="openai/gpt-5.1"
+    else
+        if [ -f "$RUNTIME_CONFIG_FILE" ]; then
+            if ! run_as_pentester excalibur-run \
+                --config "$RUNTIME_CONFIG_FILE" \
+                --ccr-config "$CCR_CONFIG_FILE" \
+                --ccr-template "$CCR_TEMPLATE_FILE" \
+                --ccr-log "$CCR_LOG_FILE" \
+                --configure-only \
+                --no-restart-router \
+                --skip-mcp; then
+                ensure_ccr_activation
+                echo -e "${YELLOW}Could not apply ${RUNTIME_CONFIG_FILE}. Open the web UI and save a valid model config.${NC}"
+                return
+            fi
+            local display_model="configured in ${RUNTIME_CONFIG_FILE}"
+        elif [ -f "$CCR_CONFIG_FILE" ]; then
+            if run_as_pentester env \
+                CCR_CONFIG_FILE="$CCR_CONFIG_FILE" \
+                RUNTIME_CONFIG_FILE="$RUNTIME_CONFIG_FILE" \
+                python3 - <<'PY'
+from pathlib import Path
+import os
 
-    # Add ccr activation to bashrc
-    echo "# CCR activation for ${mode}" >> "$BASHRC_FILE"
-    echo 'eval "$(ccr activate 2>/dev/null)" || true' >> "$BASHRC_FILE"
+from excalibur.server.local_llm_config import load_config, settings_from_config
+from excalibur.server.runtime_config import save_runtime_config
 
-    # Also export for the current session (will be inherited by exec'd shell)
-    eval "$(ccr activate 2>/dev/null)" || true
+ccr_config = Path(os.environ["CCR_CONFIG_FILE"])
+runtime_config = Path(os.environ["RUNTIME_CONFIG_FILE"])
+settings = settings_from_config(load_config(ccr_config, None))
+save_runtime_config(settings, runtime_config)
+PY
+            then
+                local display_model="migrated from existing CCR config"
+            else
+                ensure_ccr_activation
+                echo -e "${YELLOW}Could not load existing CCR config. Open the web UI, fetch models, then save.${NC}"
+                echo -e "${BLUE}YAML config will be saved at ${RUNTIME_CONFIG_FILE}${NC}"
+                return
+            fi
+        elif [ -n "${EXCALIBUR_LOCAL_LLM_MODEL:-}" ] || [ -n "${EXCALIBUR_LOCAL_LLM_MODELS:-}" ]; then
+            local enforce_ssl_args=()
+            if [ "${EXCALIBUR_LOCAL_LLM_ENFORCE_SSL:-false}" = "true" ]; then
+                enforce_ssl_args=(--enforce-ssl)
+            fi
+            run_as_pentester python3 -m excalibur.server.local_llm_config init \
+                --config "$CCR_CONFIG_FILE" \
+                --template "$CCR_TEMPLATE_FILE" \
+                --provider-type "${EXCALIBUR_LOCAL_LLM_PROVIDER_TYPE:-openai-compatible}" \
+                --api-base-url "${EXCALIBUR_LOCAL_LLM_API_BASE_URL:-http://host.docker.internal:1234/v1/chat/completions}" \
+                --models "${EXCALIBUR_LOCAL_LLM_MODELS:-${EXCALIBUR_LOCAL_LLM_MODEL}}" \
+                --selected-model "${EXCALIBUR_LOCAL_LLM_MODEL:-}" \
+                --context-window "${EXCALIBUR_LOCAL_LLM_CONTEXT_WINDOW:-60000}" \
+                "${enforce_ssl_args[@]}"
+            local display_model="localLLM (${EXCALIBUR_LOCAL_LLM_MODEL:-configured by env})"
+        else
+            ensure_ccr_activation
+            echo -e "${YELLOW}No local model configured yet. Open the web UI, fetch models, then save.${NC}"
+            echo -e "${BLUE}YAML config will be saved at ${RUNTIME_CONFIG_FILE}${NC}"
+            return
+        fi
+    fi
+
+    chown pentester:pentester "$CCR_CONFIG_FILE"
+    ensure_ccr_activation
+    start_ccr
 
     echo -e "${GREEN}CCR activated with ${mode} backend${NC}"
     echo -e "${BLUE}Default model: ${display_model}${NC}"
 }
+
+ensure_permissions
+start_ssh
+start_web_config
 
 echo ""
 echo -e "${BLUE}=== Excalibur Authentication ===${NC}"
@@ -95,7 +215,7 @@ case "$AUTH_MODE" in
         ;;
     local)
         echo -e "${GREEN}Local LLM mode${NC}"
-        echo -e "Ensure your local LLM server is running on host.docker.internal:1234"
+        echo -e "Configure models at http://127.0.0.1:${WEB_PORT}"
         setup_ccr "local" ""
         ;;
     anthropic)
@@ -123,7 +243,7 @@ echo ""
 # Execute the passed command or start bash
 # Use bash -l to ensure .bashrc is sourced (for ccr activation)
 if [ "$1" = "/bin/bash" ]; then
-    exec /bin/bash --login
+    exec gosu pentester /bin/bash --login
 else
-    exec "$@"
+    exec gosu pentester /bin/bash -lc 'eval "$(ccr activate 2>/dev/null)" || true; exec "$@"' bash "$@"
 fi

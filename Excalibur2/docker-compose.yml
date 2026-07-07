@@ -12,6 +12,10 @@ services:
       - claude-config:/home/pentester/.claude
       # Persist CCR configuration
       - ccr-config:/home/pentester/.claude-code-router
+    ports:
+      # SSH and web config UI are bound to localhost on the host.
+      - "127.0.0.1:${EXCALIBUR_SSH_PORT:-2222}:22"
+      - "127.0.0.1:${EXCALIBUR_WEB_PORT:-8080}:8080"
     stdin_open: true
     tty: true
     # Required for OpenVPN (HackTheBox/TryHackMe connectivity)
@@ -37,8 +41,16 @@ services:
       - TERM=xterm-256color
       # Python settings
       - PYTHONUNBUFFERED=1
-      # Auth mode: "openrouter", "anthropic", or "manual"
+      # Auth mode: "local", "openrouter", "anthropic", or "manual"
       - EXCALIBUR_AUTH_MODE=${EXCALIBUR_AUTH_MODE:-manual}
+      # Local SSH access. Override or use EXCALIBUR_SSH_AUTHORIZED_KEYS for keys.
+      - EXCALIBUR_SSH_PASSWORD=${EXCALIBUR_SSH_PASSWORD:-excalibur}
+      # Web UI listens inside the container; Compose binds it to localhost above.
+      - EXCALIBUR_WEB_HOST=${EXCALIBUR_WEB_HOST:-0.0.0.0}
+      - EXCALIBUR_WEB_PORT=8080
+      - EXCALIBUR_CCR_LOG=/tmp/ccr.log
+      - EXCALIBUR_ACTIVITY_LOG=/workspace/excalibur-activity.log
+      - EXCALIBUR_RUNTIME_CONFIG=/workspace/excalibur.yml
       # API keys (set based on auth mode via .env.auth)
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}

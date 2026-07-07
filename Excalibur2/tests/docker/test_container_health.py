@@ -41,7 +41,7 @@ class TestContainerHealth:
         # Wait for container to be ready
         time.sleep(5)
 
-        container_name = "excalibur"
+        container_name = "excalibur2"
 
         # Check if container is running
         check_result = subprocess.run(

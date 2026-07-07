@@ -5,6 +5,8 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
+from excalibur.core.activity_log import append_activity_record
+
 
 class Tracer:
     """Lightweight tracer for tracking agent activity."""
@@ -39,6 +41,8 @@ class Tracer:
         with self._lock:
             self._activities.append(activity)
 
+        append_activity_record("TRACER_MESSAGE", activity, timestamp)
+
         if self._on_activity_callback:
             self._on_activity_callback(activity)
 
@@ -65,6 +69,8 @@ class Tracer:
             activity_id = len(self._activities)
             self._activities.append(activity)
 
+        append_activity_record("TRACER_TOOL_START", activity, timestamp)
+
         if self._on_activity_callback:
             self._on_activity_callback(activity)
 
@@ -82,6 +88,8 @@ class Tracer:
                 activity = self._activities[activity_id]
                 activity["status"] = status
                 activity["result"] = result
+
+                append_activity_record("TRACER_TOOL_COMPLETE", activity)
 
                 if self._on_activity_callback:
                     self._on_activity_callback(activity)

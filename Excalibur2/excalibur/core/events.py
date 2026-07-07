@@ -8,6 +8,8 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import Any, Optional
 
+from excalibur.core.activity_log import append_activity_record
+
 
 class EventType(Enum):
     """Event types for agent-TUI communication."""
@@ -104,6 +106,8 @@ class EventBus:
         Args:
             event: Event to emit
         """
+        append_activity_record(event.type.name, event.data, event.timestamp)
+
         with self._handler_lock:
             handlers = self._handlers.get(event.type, []).copy()
 

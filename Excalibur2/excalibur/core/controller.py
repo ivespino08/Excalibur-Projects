@@ -16,7 +16,7 @@ from excalibur.core.backend import (
 )
 from excalibur.core.config import ExcaliburConfig
 from excalibur.core.events import Event, EventBus, EventType
-#from excalibur.core.session import SessionStatus, SessionStore
+from excalibur.core.session import SessionStatus, SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class AgentController:
         self,
         config: ExcaliburConfig,
         backend: AgentBackend | None = None,
-        #session_store: SessionStore | None = None,
+        session_store: SessionStore | None = None,
         events: EventBus | None = None,
     ):
         """Initialize controller.
@@ -70,7 +70,7 @@ class AgentController:
         """
         self.config = config
         self.backend = backend
-        #self.sessions = session_store or SessionStore()
+        self.sessions = session_store or SessionStore()
         self.events = events or EventBus.get()
 
         # State management
@@ -192,7 +192,7 @@ class AgentController:
         if self._pause_requested:
             self._pause_requested = False
             self._set_state(AgentState.PAUSED, "Paused - waiting for input")
-            #self.sessions.update_status(SessionStatus.PAUSED)
+            self.sessions.update_status(SessionStatus.PAUSED)
 
             await self._resume_event.wait()
             self._resume_event.clear()
@@ -201,10 +201,10 @@ class AgentController:
                 return True
 
             self._set_state(AgentState.RUNNING, "Resumed")
-            #self.sessions.update_status(SessionStatus.RUNNING)
+            self.sessions.update_status(SessionStatus.RUNNING)
 
             if self._pending_instruction:
-                #self.sessions.add_instruction(self._pending_instruction)
+                self.sessions.add_instruction(self._pending_instruction)
                 self.events.emit_message(f"Injecting: {self._pending_instruction[:50]}...", "info")
                 await self.backend.query(self._pending_instruction)
                 self._pending_instruction = None
@@ -229,7 +229,6 @@ class AgentController:
         self._resume_event.clear()
 
         # Create or resume session
-        '''
         if resume_session_id:
             session = self.sessions.load(resume_session_id)
             if not session:
@@ -245,7 +244,6 @@ class AgentController:
                 task=task,
                 model=self.config.llm_model,
             )
-        '''
 
         # Initialize EGATS components
         self._init_egats()
@@ -271,16 +269,15 @@ class AgentController:
 
             # Connect (or resume)
             if resume_session_id and self.backend.supports_resume:
-                #backend_session = session.backend_session_id or resume_session_id
-                #await self.backend.resume(backend_session)
+                backend_session = session.backend_session_id or resume_session_id
+                await self.backend.resume(backend_session)
                 self.events.emit_message(f"Resumed session {resume_session_id}", "info")
             else:
                 await self.backend.connect()
 
             # Store backend session ID
             if self.backend.session_id:
-                #self.sessions.set_backend_session_id(self.backend.session_id)
-                x=0
+                self.sessions.set_backend_session_id(self.backend.session_id)
 
             # Initialize attack tree
             self._attack_tree = self._planner.init_tree(self.config.target)
@@ -292,14 +289,14 @@ class AgentController:
                 "success": True,
                 "output": "\n".join(result["output_parts"]),
                 "flags_found": result["flags_found"],
-                #"session_id": session.session_id,
-                #"cost_usd": session.total_cost_usd,
+                "session_id": session.session_id,
+                "cost_usd": session.total_cost_usd,
             }
 
         except Exception as e:
             self._set_state(AgentState.ERROR, str(e))
-            #self.sessions.set_error(str(e))
-            #self.sessions.update_status(SessionStatus.ERROR)
+            self.sessions.set_error(str(e))
+            self.sessions.update_status(SessionStatus.ERROR)
             return {"success": False, "error": str(e)}
 
         finally:
@@ -341,19 +338,19 @@ class AgentController:
         # Send initial query
         self.events.emit_message(f"Query(\n" + initial_task + "\n)End Query")  #added
         await self.backend.query(initial_task)
-        #self.sessions.update_status(SessionStatus.RUNNING)
+        self.sessions.update_status(SessionStatus.RUNNING)
 
         # Process initial response
         async for msg in self.backend.receive_messages():
             if await self._check_pause_stop():
-                #self.sessions.update_status(SessionStatus.PAUSED)
+                self.sessions.update_status(SessionStatus.PAUSED)
                 return {"output_parts": output_parts, "flags_found": flags_found}
             await self._process_message(msg, output_parts, flags_found)
 
         await self.backend.query("/context")
         async for msg in self.backend.receive_messages():
             if await self._check_pause_stop():
-                #self.sessions.update_status(SessionStatus.PAUSED)
+                self.sessions.update_status(SessionStatus.PAUSED)
                 return {"output_parts": output_parts, "flags_found": flags_found}
             await self._process_message(msg, output_parts, flags_found)
 
@@ -422,7 +419,7 @@ class AgentController:
 
             # 5. Check pause/stop before querying
             if await self._check_pause_stop():
-                #self.sessions.update_status(SessionStatus.PAUSED)
+                self.sessions.update_status(SessionStatus.PAUSED)
                 return {"output_parts": output_parts, "flags_found": flags_found}
 
             # 6. Query backend
@@ -435,7 +432,7 @@ class AgentController:
 
             async for msg in self.backend.receive_messages():
                 if await self._check_pause_stop():
-                    #self.sessions.update_status(SessionStatus.PAUSED)
+                    self.sessions.update_status(SessionStatus.PAUSED)
                     return {
                         "output_parts": output_parts,
                         "flags_found": flags_found,
@@ -448,7 +445,7 @@ class AgentController:
             await self.backend.query(SUMMARY_PROMPT)
             async for msg in self.backend.receive_messages():
                 if await self._check_pause_stop():
-                #self.sessions.update_status(SessionStatus.PAUSED)
+                    self.sessions.update_status(SessionStatus.PAUSED)
                     return {"output_parts": output_parts, "flags_found": flags_found}
                 await self._process_message(msg, output_parts, flags_found)
                 # Collect text findings for tree expansion
@@ -528,10 +525,10 @@ class AgentController:
         # Finalize
         if not self._stop_requested:
             self._set_state(AgentState.COMPLETED)
-            #self.sessions.update_status(SessionStatus.COMPLETED)
+            self.sessions.update_status(SessionStatus.COMPLETED)
         else:
             self._set_state(AgentState.IDLE, "Stopped by user")
-            #self.sessions.update_status(SessionStatus.PAUSED)
+            self.sessions.update_status(SessionStatus.PAUSED)
 
         return {"output_parts": output_parts, "flags_found": flags_found}
 
@@ -716,6 +713,9 @@ class AgentController:
 
         findings = []
 
+        if not json_findings:
+            return findings
+
         print(f"My type is {type(json_findings[0])}")
 
         try:
@@ -838,7 +838,7 @@ class AgentController:
             for flag in detected:
                 if flag not in flags_found:
                     flags_found.append(flag)
-                    #self.sessions.add_flag(flag, msg.content[:200])
+                    self.sessions.add_flag(flag, msg.content[:200])
                     self.events.emit_flag(flag, msg.content[:200])
 
         elif msg.type == MessageType.TOOL_START:
@@ -858,7 +858,7 @@ class AgentController:
         elif msg.type == MessageType.RESULT:
             cost = msg.metadata.get("cost_usd", 0)
             if cost > 0:
-                #self.sessions.add_cost(cost)
+                self.sessions.add_cost(cost)
                 x=0
 
     def _detect_flags(self, text: str) -> list[str]:

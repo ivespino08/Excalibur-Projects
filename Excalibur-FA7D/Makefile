@@ -1,7 +1,7 @@
 # Excalibur Makefile
 # Usage: make [target]
 
-.PHONY: help install config connect start stop shell logs clean-docker
+.PHONY: help install config connect ssh web attach start stop shell logs clean-docker
 .PHONY: dev-install test test-all test-cov lint format typecheck check clean
 
 # Default target
@@ -12,7 +12,10 @@ help:
 	@echo "Docker Workflow:"
 	@echo "  make install         Build Docker image and install dependencies"
 	@echo "  make config          Configure authentication (interactive)"
-	@echo "  make connect         Connect to container (main entry point)"
+	@echo "  make connect         Start container and connect over SSH"
+	@echo "  make ssh             Connect over SSH to the running container"
+	@echo "  make web             Print the local web config UI URL"
+	@echo "  make attach          Attach to the container TTY"
 	@echo "  make start           Start container in background"
 	@echo "  make stop            Stop container (keeps config)"
 	@echo "  make shell           Open new shell in running container"
@@ -43,7 +46,22 @@ config:
 	@chmod +x scripts/config.sh
 	@./scripts/config.sh
 
-connect:
+# Start the container and connect over SSH (main entry point)
+# Handles different auth modes automatically based on .env.auth
+connect: start ssh
+
+# Connect to the running container over SSH
+ssh:
+	@echo "Connecting to Excalibur over SSH..."
+	@echo "Default password: $${EXCALIBUR_SSH_PASSWORD:-excalibur}"
+	@ssh -o StrictHostKeyChecking=accept-new -p "$${EXCALIBUR_SSH_PORT:-2222}" pentester@127.0.0.1
+
+# Print the web config UI URL
+web:
+	@echo "Excalibur config UI: http://127.0.0.1:$${EXCALIBUR_WEB_PORT:-8080}"
+
+# Attach to the running container TTY (legacy workflow)
+attach:
 	@if [ "$$(docker ps -q -f name=excalibur)" ]; then \
 		echo "Attaching to running container..."; \
 		docker attach excalibur; \
@@ -67,7 +85,7 @@ stop:
 	docker compose down
 
 shell:
-	docker exec -it excalibur /bin/bash
+	docker exec -it --user pentester excalibur /bin/bash
 
 logs:
 	docker compose logs -f
