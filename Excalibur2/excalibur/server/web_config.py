@@ -1279,7 +1279,13 @@ def ensure_bashrc_activation(bashrc_path: Path) -> None:
     """Ensure interactive SSH shells activate Claude Code Router."""
     block_start = "# Excalibur CCR activation"
     block_end = "# End Excalibur CCR activation"
-    block = f'{block_start}\neval "$(ccr activate 2>/dev/null)" || true\n{block_end}\n'
+    # `ccr activate` lazily creates its config file on first run and prints
+    # human-readable status lines (e.g. "Created minimal default configuration
+    # file...") to stdout alongside the export/unset statements we actually
+    # want to eval. Filter to just the shell statements so those stray lines
+    # don't get executed as commands.
+    activate_cmd = "ccr activate 2>/dev/null | grep -E '^(export|unset) '"
+    block = f'{block_start}\neval "$({activate_cmd})" || true\n{block_end}\n'
 
     existing = bashrc_path.read_text(encoding="utf-8") if bashrc_path.exists() else ""
     lines = existing.splitlines(keepends=True)

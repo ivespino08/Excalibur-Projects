@@ -245,5 +245,8 @@ echo ""
 if [ "$1" = "/bin/bash" ]; then
     exec gosu pentester /bin/bash --login
 else
-    exec gosu pentester /bin/bash -lc 'eval "$(ccr activate 2>/dev/null)" || true; exec "$@"' bash "$@"
+    # Filter to export/unset lines only: `ccr activate` prints stray status
+    # text to stdout the first time it creates its config file, and eval'ing
+    # that raw would try to run it as shell commands.
+    exec gosu pentester /bin/bash -lc 'eval "$(ccr activate 2>/dev/null | grep -E "^(export|unset) ")" || true; exec "$@"' bash "$@"
 fi
