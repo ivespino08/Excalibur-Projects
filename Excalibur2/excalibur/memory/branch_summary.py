@@ -28,7 +28,7 @@ def _collect_node_ids(tree: Any, node_id: str) -> list[str]:
 
     Args:
         tree: An AttackTree (or any object with a ``nodes`` dict whose
-              values expose a ``children`` list of node-id strings).
+              values expose a ``children_ids`` list of node-id strings).
         node_id: Root of the sub-tree to collect.
 
     Returns:
@@ -39,7 +39,7 @@ def _collect_node_ids(tree: Any, node_id: str) -> list[str]:
     node = nodes.get(node_id)
     if node is None:
         return ids
-    for child_id in getattr(node, "children", []):
+    for child_id in getattr(node, "children_ids", []):
         ids.extend(_collect_node_ids(tree, child_id))
     return ids
 
@@ -77,9 +77,12 @@ def summarize_branch(tree: Any, node_id: str) -> BranchSummary:
         if node is None:
             continue
 
-        # Status
-        status = getattr(node, "status", "unknown")
-        statuses.append(str(status))
+        # Status -- use .value so we get "active" rather than
+        # "NodeStatus.ACTIVE" (str(Enum) does not use the value directly
+        # for a plain `class NodeStatus(str, Enum)`).
+        status = getattr(node, "status", None)
+        status_value = status.value if hasattr(status, "value") else str(status or "unknown")
+        statuses.append(status_value)
 
         # Findings stored on the node (list[str] or similar)
         for finding in getattr(node, "findings", []):
@@ -87,35 +90,39 @@ def summarize_branch(tree: Any, node_id: str) -> BranchSummary:
             if entry and entry not in key_findings:
                 key_findings.append(entry)
 
-        # Tool outputs may also contain findings
-        for tool_output in getattr(node, "tool_outputs", []):
-            tool_name = ""
-            if isinstance(tool_output, dict):
-                tool_name = tool_output.get("tool", "")
-            else:
-                tool_name = str(getattr(tool_output, "tool", ""))
-            if tool_name and tool_name not in tools_used:
-                tools_used.append(tool_name)
+        # Tool usage: AttackNode only tracks a single `tool_used` string,
+        # not a list of tool-output dicts.
+        tool_name = getattr(node, "tool_used", None)
+        if tool_name and tool_name not in tools_used:
+            tools_used.append(tool_name)
 
-        # Recommended next actions (if the node exposes them)
+        # Recommended next actions: AttackNode has no such field today, so
+        # this will always be empty until/unless that field is added. Left
+        # in place (rather than removed) so BranchSummary's schema doesn't
+        # need to change if that field is introduced later.
         for action in getattr(node, "recommended_actions", []):
             entry = str(action).strip()
             if entry and entry not in recommended_actions:
                 recommended_actions.append(entry)
 
-    # Derive overall branch status from collected statuses
-    if "exploited" in statuses:
-        overall_status = "exploited"
-    elif "running" in statuses:
-        overall_status = "running"
-    elif "failed" in statuses and all(s in ("failed", "unknown") for s in statuses):
+    # Derive overall branch status from collected statuses. Uses the real
+    # NodeStatus values (pending/active/completed/pruned/failed) -- the
+    # previous "exploited"/"running" checks never matched anything, since
+    # those aren't values NodeStatus actually has.
+    if "active" in statuses:
+        overall_status = "active"
+    elif "pending" in statuses:
+        overall_status = "pending"
+    elif statuses and all(s == "completed" for s in statuses):
+        overall_status = "completed"
+    elif statuses and all(s in ("failed", "pruned") for s in statuses):
         overall_status = "failed"
     elif statuses:
         overall_status = statuses[0]
     else:
         overall_status = "unknown"
 
-    tdi_score = getattr(root_node, "tdi_score", None)
+    tdi_score = root_node.tdi.value if root_node.tdi is not None else None
 
     return BranchSummary(
         node_id=node_id,

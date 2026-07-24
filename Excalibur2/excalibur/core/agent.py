@@ -100,6 +100,12 @@ class ExcaliburAgent:
                 permission_mode=self.config.permission_mode,  # type: ignore[arg-type]
                 system_prompt=self._build_system_prompt(),
                 model=self.config.llm_model,
+                # Discover Agent Skills from ~/.claude/skills/ (installed at
+                # image build time -- see Dockerfile). "user" rather than
+                # "project" since working_directory is a per-engagement
+                # workspace, not a fixed project root. Leaving `skills`
+                # unset enables all discovered skills automatically.
+                setting_sources=["user"],
             )
             logger.debug(f"Options created: cwd={options.cwd}, model={options.model}")
 

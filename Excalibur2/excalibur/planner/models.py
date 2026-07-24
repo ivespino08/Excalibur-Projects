@@ -131,6 +131,15 @@ class AttackTree(BaseModel):
     total_actions: int = 0
     compromised_hosts: list[str] = Field(default_factory=list)
     budget_remaining: int = 300
+    active_node_id: str | None = Field(
+        default=None,
+        description=(
+            "ID of the node currently selected/being worked on. Set by the "
+            "planner after each UCB selection; used by the Memory "
+            "Subsystem's ContextCompressor to distinguish the active path "
+            "from branches eligible for summarization."
+        ),
+    )
 
     def get_node(self, node_id: str) -> AttackNode | None:
         """Retrieve a node by its ID, or None if not found."""

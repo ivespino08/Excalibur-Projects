@@ -16,7 +16,7 @@ from excalibur.core.backend import (
 )
 from excalibur.core.config import ExcaliburConfig
 from excalibur.core.events import Event, EventBus, EventType
-#from excalibur.core.session import SessionStatus, SessionStore
+from excalibur.core.session import SessionStatus, SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class AgentController:
         self,
         config: ExcaliburConfig,
         backend: AgentBackend | None = None,
-        #session_store: SessionStore | None = None,
+        session_store: SessionStore | None = None,
         events: EventBus | None = None,
     ):
         """Initialize controller.
@@ -70,7 +70,7 @@ class AgentController:
         """
         self.config = config
         self.backend = backend
-        #self.sessions = session_store or SessionStore()
+        self.sessions = session_store or SessionStore()
         self.events = events or EventBus.get()
 
         # State management
@@ -85,7 +85,7 @@ class AgentController:
         self._state_store: Any = None
         self._context_assembler: Any = None
         self._context_compressor: Any = None
-        #self._tool_registry: Any = None
+        self._tool_registry: Any = None
         self._attack_tree: Any = None
 
         # Subscribe to user events
@@ -98,18 +98,16 @@ class AgentController:
         from excalibur.memory.context_compressor import ContextCompressor
         from excalibur.memory.state_store import StateStore
         from excalibur.planner.egats import EGATSPlanner
-        
+        from excalibur.tools.registry import get_registry
 
         self._planner = EGATSPlanner(config=self.config.egats_config)
         self._state_store = StateStore(db_path=self.config.state_store_path)
         self._context_assembler = ContextAssembler(self._state_store)
-        #'''
         self._context_compressor = ContextCompressor(
             ideal_threshold=self.config.context_ideal_threshold,
-           aggressive_threshold=self.config.context_aggressive_threshold,
+            aggressive_threshold=self.config.context_aggressive_threshold,
         )
-        #'''
-        #self._tool_registry = get_registry()
+        self._tool_registry = get_registry()
 
     @property
     def state(self) -> AgentState:
@@ -192,7 +190,7 @@ class AgentController:
         if self._pause_requested:
             self._pause_requested = False
             self._set_state(AgentState.PAUSED, "Paused - waiting for input")
-            #self.sessions.update_status(SessionStatus.PAUSED)
+            self.sessions.update_status(SessionStatus.PAUSED)
 
             await self._resume_event.wait()
             self._resume_event.clear()
@@ -201,10 +199,10 @@ class AgentController:
                 return True
 
             self._set_state(AgentState.RUNNING, "Resumed")
-            #self.sessions.update_status(SessionStatus.RUNNING)
+            self.sessions.update_status(SessionStatus.RUNNING)
 
             if self._pending_instruction:
-                #self.sessions.add_instruction(self._pending_instruction)
+                self.sessions.add_instruction(self._pending_instruction)
                 self.events.emit_message(f"Injecting: {self._pending_instruction[:50]}...", "info")
                 await self.backend.query(self._pending_instruction)
                 self._pending_instruction = None
@@ -229,7 +227,6 @@ class AgentController:
         self._resume_event.clear()
 
         # Create or resume session
-        '''
         if resume_session_id:
             session = self.sessions.load(resume_session_id)
             if not session:
@@ -245,7 +242,6 @@ class AgentController:
                 task=task,
                 model=self.config.llm_model,
             )
-        '''
 
         # Initialize EGATS components
         self._init_egats()
@@ -258,7 +254,6 @@ class AgentController:
                 working_directory=str(self.config.working_directory),
                 system_prompt=get_ctf_prompt(self.config.custom_instruction),
                 model=self.config.llm_model,
-                events=self.events,                             #added          
             )
 
         try:
@@ -271,16 +266,15 @@ class AgentController:
 
             # Connect (or resume)
             if resume_session_id and self.backend.supports_resume:
-                #backend_session = session.backend_session_id or resume_session_id
-                #await self.backend.resume(backend_session)
+                backend_session = session.backend_session_id or resume_session_id
+                await self.backend.resume(backend_session)
                 self.events.emit_message(f"Resumed session {resume_session_id}", "info")
             else:
                 await self.backend.connect()
 
             # Store backend session ID
             if self.backend.session_id:
-                #self.sessions.set_backend_session_id(self.backend.session_id)
-                x=0
+                self.sessions.set_backend_session_id(self.backend.session_id)
 
             # Initialize attack tree
             self._attack_tree = self._planner.init_tree(self.config.target)
@@ -292,14 +286,14 @@ class AgentController:
                 "success": True,
                 "output": "\n".join(result["output_parts"]),
                 "flags_found": result["flags_found"],
-                #"session_id": session.session_id,
-                #"cost_usd": session.total_cost_usd,
+                "session_id": session.session_id,
+                "cost_usd": session.total_cost_usd,
             }
 
         except Exception as e:
             self._set_state(AgentState.ERROR, str(e))
-            #self.sessions.set_error(str(e))
-            #self.sessions.update_status(SessionStatus.ERROR)
+            self.sessions.set_error(str(e))
+            self.sessions.update_status(SessionStatus.ERROR)
             return {"success": False, "error": str(e)}
 
         finally:
@@ -336,35 +330,26 @@ class AgentController:
         output_parts: list[str] = []
         flags_found: list[str] = []
         tree = self._attack_tree
-        budget = 95 #self.config.max_budget
+        budget = 40#self.config.max_budget
 
-        # Send initial query
-        self.events.emit_message(f"Query(\n" + initial_task + "\n)End Query")  #added
-        await self.backend.query(initial_task)
-        #self.sessions.update_status(SessionStatus.RUNNING)
+        self.sessions.update_status(SessionStatus.RUNNING)
 
-        # Process initial response
-        async for msg in self.backend.receive_messages():
-            if await self._check_pause_stop():
-                #self.sessions.update_status(SessionStatus.PAUSED)
-                return {"output_parts": output_parts, "flags_found": flags_found}
-            await self._process_message(msg, output_parts, flags_found)
-
-        await self.backend.query("/context")
-        async for msg in self.backend.receive_messages():
-            if await self._check_pause_stop():
-                #self.sessions.update_status(SessionStatus.PAUSED)
-                return {"output_parts": output_parts, "flags_found": flags_found}
-            await self._process_message(msg, output_parts, flags_found)
-
-        tree.total_actions += 1
-        budget -= 1
-
-        # EGATS iteration loop
+        # EGATS iteration loop. The very first pass acts as "iteration
+        # zero": the root node (the only active leaf right after
+        # init_tree()) gets selected naturally, but is sent *initial_task*
+        # verbatim instead of a synthesized EGATS query, since there's
+        # nothing yet discovered for _build_egats_query's context/FOCUS
+        # sections to describe. Every step after that -- TDI, mode,
+        # backprop, state-store population, tree expansion, pruning,
+        # compression -- runs identically for this and every later
+        # iteration, so the initial exchange is no longer invisible to
+        # the attack tree.
         while budget > 0 and not self._stop_requested:
             # Check for flags found -> goal reached
             if flags_found:
                 logger.info("Flags found, continuing to verify completeness")
+
+            is_first_iteration = tree.total_actions == 0
 
             # 1. Select node via UCB
             current_node = self._planner.select_next_node(tree)
@@ -373,6 +358,7 @@ class AgentController:
                 break
 
             current_node.status = NodeStatus.ACTIVE
+            tree.active_node_id = current_node.id
             self.events.emit(
                 Event(
                     EventType.TREE_NODE_SELECTED,
@@ -380,13 +366,16 @@ class AgentController:
                 )
             )
 
-            # 2. Compute TDI
+            # 2. Compute TDI (horizon estimated via a dedicated LLM query;
+            # falls back to the deterministic tree-depth proxy on failure)
             context_load = 0.0
             if self._context_assembler:
                 ctx = self._context_assembler.assemble(current_node, tree, "reconnaissance")
                 context_load = self._context_assembler.get_context_load(ctx)
-            #'''
-            tdi = self._planner.compute_tdi(current_node, tree, context_load)
+
+            llm_horizon = await self._estimate_horizon_llm(current_node, tree)
+
+            tdi = self._planner.compute_tdi(current_node, tree, context_load, llm_horizon=llm_horizon)
             self.events.emit(
                 Event(
                     EventType.TDI_COMPUTED,
@@ -396,7 +385,6 @@ class AgentController:
 
             # 3. Select mode
             mode = self._planner.select_mode(tdi)
-            
             self.events.emit(
                 Event(
                     EventType.MODE_SELECTED,
@@ -404,25 +392,25 @@ class AgentController:
                 )
             )
 
-            #'''
-            #tdi=0.5
-            #mode = 'llm_decide'
+            if is_first_iteration:
+                # Use the initial task verbatim rather than a synthesized
+                # EGATS query -- there's no prior context/findings for
+                # _build_egats_query to assemble yet.
+                query = initial_task
+            else:
+                # 4. Assemble context prompt
+                context_prompt = ""
+                if self._context_assembler:
+                    context_prompt = self._context_assembler.assemble(
+                        current_node, tree, mode, tdi.value
+                    )
 
-            # 4. Assemble context prompt
-            context_prompt = ""
-            if self._context_assembler:
-                context_prompt = self._context_assembler.assemble(
-                    current_node, tree, mode, tdi.value
-                    #current_node, tree, mode, tdi
-                )
-
-            # Build query from context + node description
-            query = self._build_egats_query(current_node, mode, context_prompt, tdi.value)
-            #query = self._build_egats_query(current_node, mode, context_prompt, tdi)
+                # Build query from context + node description
+                query = self._build_egats_query(current_node, mode, context_prompt, tdi.value)
 
             # 5. Check pause/stop before querying
             if await self._check_pause_stop():
-                #self.sessions.update_status(SessionStatus.PAUSED)
+                self.sessions.update_status(SessionStatus.PAUSED)
                 return {"output_parts": output_parts, "flags_found": flags_found}
 
             # 6. Query backend
@@ -431,25 +419,14 @@ class AgentController:
 
             # 7. Process response and collect findings
             iteration_findings: list[str] = []
-            iteration_messages: list[str] = []
-
+            flags_before = list(flags_found)  # snapshot before _process_message mutates it
             async for msg in self.backend.receive_messages():
                 if await self._check_pause_stop():
-                    #self.sessions.update_status(SessionStatus.PAUSED)
+                    self.sessions.update_status(SessionStatus.PAUSED)
                     return {
                         "output_parts": output_parts,
                         "flags_found": flags_found,
                     }
-                await self._process_message(msg, output_parts, flags_found)
-                # Collect text messages for
-                if msg.type == MessageType.TEXT and msg.content:
-                    iteration_messages.append(msg.content)
-            
-            await self.backend.query(SUMMARY_PROMPT)
-            async for msg in self.backend.receive_messages():
-                if await self._check_pause_stop():
-                #self.sessions.update_status(SessionStatus.PAUSED)
-                    return {"output_parts": output_parts, "flags_found": flags_found}
                 await self._process_message(msg, output_parts, flags_found)
                 # Collect text findings for tree expansion
                 if msg.type == MessageType.TEXT and msg.content:
@@ -459,13 +436,29 @@ class AgentController:
             budget -= 1
             tree.budget_remaining = budget
 
+            # 7b. Ask for a structured JSON summary of new findings, to
+            # populate the state store. This is a bookkeeping round-trip,
+            # not part of the walkthrough narrative -- collect its text
+            # directly rather than routing it through _process_message, so
+            # it doesn't pollute output_parts or trigger flag/event noise.
+            summary_parts: list[str] = []
+            await self.backend.query(SUMMARY_PROMPT)
+            async for msg in self.backend.receive_messages():
+                if await self._check_pause_stop():
+                    self.sessions.update_status(SessionStatus.PAUSED)
+                    return {
+                        "output_parts": output_parts,
+                        "flags_found": flags_found,
+                    }
+                if msg.type == MessageType.TEXT and msg.content:
+                    summary_parts.append(msg.content)
+
             # 8. Update tree with findings
             if iteration_findings:
                 current_node.findings.extend(iteration_findings[:3])
 
             # 9. Backpropagate
-            #'''
-            outcome = self._assess_outcome(iteration_messages, flags_found)
+            outcome = self._assess_outcome(iteration_findings, flags_before)
             self._planner.backpropagate(tree, current_node, outcome)
             self.events.emit(
                 Event(
@@ -477,10 +470,14 @@ class AgentController:
                     },
                 )
             )
-            #'''
 
-            # 10. Expand tree with child nodes for new findings
-            new_findings = self._extract_json_findings(iteration_findings)
+            # 10. Expand tree with child nodes for new findings, using the
+            # structured JSON summary (also populates the state store).
+            # Evidence levels are classified from the raw action-response
+            # text (iteration_findings), per Appendix C -- the summary text
+            # is a paraphrase and wouldn't contain the actual tool-output
+            # patterns (e.g. nmap version strings, sqlmap "injectable").
+            new_findings = self._extract_json_findings(summary_parts, iteration_findings)
             if new_findings:
                 new_nodes = self._planner.expand_tree(tree, current_node, new_findings)
                 if new_nodes:
@@ -495,7 +492,6 @@ class AgentController:
                     )
 
             # 11. Check pruning
-            #'''
             pruned = self._planner.check_pruning(tree)
             if pruned:
                 self.events.emit(
@@ -504,9 +500,6 @@ class AgentController:
                         {"pruned_ids": pruned},
                     )
                 )
-
-                self.events.emit_message("[PRUNING]")
-            #'''
 
             # 12. Check context compression
             if (
@@ -528,12 +521,78 @@ class AgentController:
         # Finalize
         if not self._stop_requested:
             self._set_state(AgentState.COMPLETED)
-            #self.sessions.update_status(SessionStatus.COMPLETED)
+            self.sessions.update_status(SessionStatus.COMPLETED)
         else:
             self._set_state(AgentState.IDLE, "Stopped by user")
-            #self.sessions.update_status(SessionStatus.PAUSED)
+            self.sessions.update_status(SessionStatus.PAUSED)
 
         return {"output_parts": output_parts, "flags_found": flags_found}
+
+    async def _estimate_horizon_llm(self, node: Any, tree: Any) -> float | None:
+        """Ask the model to estimate remaining steps to the goal from *node*.
+
+        Implements the horizon estimation dimension as an actual LLM
+        judgment (per §4.3.1), rather than the deterministic tree-depth
+        proxy in TDAComputer._estimate_horizon_fallback. This is a
+        bookkeeping round-trip, like the SUMMARY_PROMPT query -- its
+        response is parsed directly rather than routed through
+        _process_message, so it doesn't pollute output_parts or trigger
+        flag/event noise.
+
+        Args:
+            node: The attack node to estimate horizon for.
+            tree: The full attack tree (for path context).
+
+        Returns:
+            A float in [0.0, 1.0] (0.0 = very close to goal, 1.0 = very
+            far), or ``None`` if the query failed or the response couldn't
+            be parsed -- callers should fall back to the structural proxy
+            in that case (compute_tdi does this automatically when passed
+            ``llm_horizon=None``).
+        """
+        import re
+
+        from excalibur.prompts.tda_prompts import HORIZON_ESTIMATION_PROMPT
+
+        path = tree.get_path_to_root(node.id)
+        path_description = " -> ".join(
+            n.description for n in reversed(path) if n.description
+        ) or "(no path yet)"
+
+        findings = node.findings[-5:] if node.findings else []
+        findings_description = "; ".join(findings) if findings else "(none yet)"
+
+        prompt = HORIZON_ESTIMATION_PROMPT.format(
+            node_description=node.description or "(no description)",
+            path_description=path_description,
+            findings=findings_description,
+        )
+
+        try:
+            response_parts: list[str] = []
+            await self.backend.query(prompt)
+            async for msg in self.backend.receive_messages():
+                if msg.type == MessageType.TEXT and msg.content:
+                    response_parts.append(msg.content)
+        except Exception as e:
+            self.events.emit_message(f"Horizon estimation query failed: {e}", "warning")
+            return None
+
+        combined = "".join(response_parts).strip()
+        match = re.search(r"(\d*\.?\d+)", combined)
+        if match is None:
+            self.events.emit_message(
+                f"Horizon estimation response had no parseable float: {combined[:100]!r}",
+                "warning",
+            )
+            return None
+
+        try:
+            value = float(match.group(1))
+        except ValueError:
+            return None
+
+        return max(0.0, min(1.0, value))
 
     def _build_egats_query(
         self,
@@ -553,23 +612,27 @@ class AgentController:
         Returns:
             Query string for the backend.
         """
+        from excalibur.prompts.tda_prompts import (
+            BFS_RECONNAISSANCE_ADDENDUM,
+            DFS_EXPLOITATION_ADDENDUM,
+        )
+
         parts = []
 
-        # Mode directive
+        # Mode directive -- use the actual BFS/DFS addenda instead of the
+        # previous ad-hoc one-line FOCUS text.
         if mode == "reconnaissance":
-            parts.append(
-                "FOCUS: Broad reconnaissance and enumeration. "
-                "Discover services, ports, vulnerabilities, and attack surfaces."
-            )
+            parts.append(BFS_RECONNAISSANCE_ADDENDUM.format(tdi_value=tdi_value))
         elif mode == "exploitation":
-            parts.append(
-                "FOCUS: Deep exploitation. Leverage known findings to gain access, "
-                "escalate privileges, and capture flags."
-            )
+            parts.append(DFS_EXPLOITATION_ADDENDUM.format(tdi_value=tdi_value))
         else:
+            # No dedicated addendum exists for llm_decide -- keep a short
+            # generic directive so the query isn't left without guidance.
             parts.append(
-                "FOCUS: Assess the situation and decide whether to enumerate "
-                "further or exploit known vulnerabilities."
+                f"MODE: LLM-DECIDE (TDI={tdi_value:.2f})\n"
+                "The situation is ambiguous. Assess the current evidence and "
+                "decide whether to enumerate further or exploit a known "
+                "vulnerability, then proceed accordingly."
             )
 
         # Node description
@@ -640,7 +703,6 @@ class AgentController:
         Returns:
             List of finding dicts suitable for tree expansion.
         """
-
         findings = []
         combined = " ".join(text_findings).lower()
 
@@ -670,7 +732,6 @@ class AgentController:
                 }
             )
 
-
         # Look for vulnerability indicators
         vuln_keywords = [
             "sql injection",
@@ -694,16 +755,123 @@ class AgentController:
                 )
 
         return findings[:10]  # Limit expansion
-    
 
-    def _extract_json_findings(self, json_findings: list[str]) -> list[dict[str, Any]]:
-        """Extract structured findings from text for tree expansion.
+    # Deterministic evidence-confidence rubric, per Appendix C. Returns only
+    # the four canonical EvidenceLevel values (1.0/0.8/0.5/0.3) so results
+    # are always valid for EvidenceLevel(...), which does not coerce
+    # arbitrary floats to the nearest member.
+    _EVIDENCE_SESSION_PATTERNS: ClassVar[list[str]] = [
+        "session opened",
+        "shell established",
+        "logged in as",
+        "authentication succeeded",
+        "successful login",
+        "connection established",
+        "valid credentials",
+        "authenticated as",
+        "got a shell",
+        "meterpreter session",
+        "ssh connection succeeded",
+        "login successful",
+    ]
+    _EVIDENCE_CONFIRMED_PATTERNS: ClassVar[list[str]] = [
+        "injectable",
+        "successfully exploited",
+        "vulnerable to",
+        "exploit succeeded",
+        "rce confirmed",
+        "confirmed vulnerable",
+        "injection confirmed",
+        "exploitation successful",
+    ]
+    _EVIDENCE_VERSION_PATTERN: ClassVar[str] = r"\bv?\d+\.\d+(?:\.\d+)?[a-z0-9]*\b"
+
+    def _classify_evidence(
+        self,
+        raw_text: str,
+        identifiers: list[str | None],
+        has_version: bool = False,
+    ) -> float:
+        """Classify evidence confidence for an entity from raw tool-output text.
+
+        Per Appendix C: nmap output containing an open port with a service
+        version triggers version-matched confidence (0.5); sqlmap-style
+        "injectable"/confirmed-exploitation language triggers confirmed
+        injection (0.8); a successful session/login triggers valid
+        credentials (1.0). Bare port/service identification with no
+        version or confirmation language falls back to speculative (0.3).
 
         Args:
-            text_findings: Raw text findings from backend.
+            raw_text: The raw action-response text for this iteration
+                (not the paraphrased JSON summary -- that wouldn't contain
+                the actual tool-output patterns this looks for).
+            identifiers: Strings identifying the entity being scored (e.g.
+                an IP, port, service name, or CVE ID). Used to narrow the
+                search to lines actually mentioning this entity, so an
+                unrelated confirmed exploit elsewhere in the same
+                iteration's output doesn't inflate this entity's score.
+            has_version: Whether the caller already knows a version string
+                was associated with this entity (e.g. a service's
+                ``version`` field was populated in the JSON summary),
+                which alone is enough to qualify for PLAUSIBLE (0.5) even
+                if the raw text search below doesn't independently find one.
 
         Returns:
-            List of finding dicts suitable for tree expansion.
+            One of ``1.0``, ``0.8``, ``0.5``, or ``0.3``.
+        """
+        idents = [i for i in identifiers if i]
+
+        if not raw_text:
+            return 0.5 if has_version else 0.3
+
+        lines = raw_text.splitlines()
+        relevant_lines = [
+            line for line in lines if any(ident.lower() in line.lower() for ident in idents)
+        ]
+        # If none of the identifiers appear anywhere (e.g. very short/odd
+        # output), fall back to scanning the whole iteration's text rather
+        # than scoring blind -- better an approximate match than none.
+        context = "\n".join(relevant_lines).lower() if relevant_lines else raw_text.lower()
+
+        if any(p in context for p in self._EVIDENCE_SESSION_PATTERNS):
+            return 1.0
+        if any(p in context for p in self._EVIDENCE_CONFIRMED_PATTERNS):
+            return 0.8
+        if has_version or re.search(self._EVIDENCE_VERSION_PATTERN, context):
+            return 0.5
+        return 0.3
+
+    def _extract_json_findings(
+        self,
+        summary_parts: list[str],
+        raw_action_text: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Parse a structured JSON summary response and populate the state store.
+
+        Expects the backend's response to SUMMARY_PROMPT: a single JSON object
+        with "hosts", "services", "credentials", "sessions", and
+        "vulnerabilities" lists (see excalibur.prompts.summarize).
+
+        Unlike the regex-based ``_extract_findings``, this also writes
+        discovered entities into the Memory Subsystem's StateStore so they
+        persist independently of the attack tree / conversation context.
+
+        Args:
+            summary_parts: Text blocks collected from the backend's response
+                to the SUMMARY_PROMPT query. May be more than one block if
+                the response was streamed/split.
+            raw_action_text: Text blocks from the actual action/recon
+                response for this iteration (i.e. ``iteration_findings``),
+                used to classify evidence confidence per Appendix C's
+                rubric. This is deliberately the raw response, not the
+                summary -- the summary is a paraphrase and wouldn't contain
+                the tool-output patterns (nmap version strings, sqlmap
+                "injectable", etc.) the rubric looks for.
+
+        Returns:
+            List of finding dicts suitable for tree expansion (capped at 10).
+            Returns an empty list if the response was empty or not valid,
+            parseable JSON matching the expected schema.
         """
         from excalibur.memory.models import (
             CredentialEntity,
@@ -714,105 +882,162 @@ class AgentController:
         )
         import json
 
-        findings = []
+        raw_text = "".join(raw_action_text) if raw_action_text else ""
 
-        print(f"My type is {type(json_findings[0])}")
+        findings: list[dict[str, Any]] = []
+
+        if not summary_parts:
+            return findings
+
+        combined = "".join(summary_parts).strip()
+        if not combined:
+            return findings
 
         try:
-            f = json.loads(json_findings[0])
+            data = json.loads(combined)
+        except json.JSONDecodeError as e:
+            self.events.emit_message(f"Summary response was not valid JSON: {e}", "error")
+            return findings
 
-            for host in f["hosts"]:
+        if self._state_store is None:
+            return findings
+
+        # --- Hosts ---
+        for host in data.get("hosts", []):
+            try:
                 self._state_store.add_host(
                     HostEntity(
-                        ip_address = host["ip_address"],
-                        hostname = host["hostname"]
+                        ip_address=host["ip_address"],
+                        hostname=host.get("hostname") or None,
                     )
                 )
-
+                evidence = self._classify_evidence(
+                    raw_text, [host["ip_address"], host.get("hostname")]
+                )
                 findings.append(
                     {
-                        "description": f"Discovered host: {host["ip_address"]}",
+                        "description": f"Discovered host: {host['ip_address']}",
                         "host": host["ip_address"],
-                        "evidence": 0.8,
+                        "evidence": evidence,
                         "type": "observation",
                     }
                 )
+            except (KeyError, TypeError) as e:
+                self.events.emit_message(f"Skipping malformed host entry: {e}", "warning")
 
-            for service in f["services"]:
-                host_ip = service["host_ip"]
-                host = self._state_store.get_host_by_ip(host_ip)
-
+        # --- Services ---
+        for service in data.get("services", []):
+            try:
+                host = self._state_store.get_host_by_ip(service["host_ip"])
+                if host is None:
+                    self.events.emit_message(
+                        f"Skipping service on unknown host: {service.get('host_ip')}", "warning"
+                    )
+                    continue
                 self._state_store.add_service(
                     ServiceEntity(
-                        host_id = host.id,
-                        port = service["port"],
-                        protocol = service["protocol"],
-                        service_name = service["service_name"],
-                        version = service["version"]
+                        host_id=host.id,
+                        port=int(service["port"]),
+                        protocol=service.get("protocol", "tcp"),
+                        service_name=service.get("service_name") or None,
+                        version=service.get("version") or None,
                     )
                 )
-
+                evidence = self._classify_evidence(
+                    raw_text,
+                    [service["host_ip"], str(service["port"]), service.get("service_name")],
+                    has_version=bool(service.get("version")),
+                )
                 findings.append(
                     {
-                        "description": f"Open port {service["port"]}/{service["protocol"]}",
-                        "evidence": 0.8,
+                        "description": f"Open port {service['port']}/{service.get('protocol', 'tcp')}",
+                        "host": service["host_ip"],
+                        "evidence": evidence,
                         "type": "observation",
                     }
                 )
+            except (KeyError, TypeError, ValueError) as e:
+                self.events.emit_message(f"Skipping malformed service entry: {e}", "warning")
 
-            for credential in f["credentials"]:
-                valid_for = []
-                for ip in credential["valid_for"]:
+        # --- Credentials ---
+        for credential in data.get("credentials", []):
+            try:
+                valid_for: list[str] = []
+                for ip in credential.get("valid_for", []):
                     host = self._state_store.get_host_by_ip(ip)
-                    valid_for.append(host.id)
-
+                    if host is not None:
+                        valid_for.append(host.id)
                 self._state_store.add_credential(
                     CredentialEntity(
-                        username = credential["username"],
-                        domain = credential["domain"],
-                        valid_for = valid_for,
-                        credential_type = credential["credential_type"],
-                        credential_value = credential["credential_value"],
+                        username=credential["username"],
+                        domain=credential.get("domain") or None,
+                        valid_for=valid_for,
+                        credential_type=credential.get("credential_type", "password"),
+                        credential_value=credential.get("credential_value", ""),
                     )
                 )
+            except (KeyError, TypeError) as e:
+                self.events.emit_message(f"Skipping malformed credential entry: {e}", "warning")
 
-            for session in f["sessions"]:
-                host_ip = session["host_ip"]
-                host = self._state_store.get_host_by_ip(host_ip)
-
+        # --- Sessions ---
+        for session in data.get("sessions", []):
+            try:
+                host = self._state_store.get_host_by_ip(session["host_ip"])
+                if host is None:
+                    self.events.emit_message(
+                        f"Skipping session on unknown host: {session.get('host_ip')}", "warning"
+                    )
+                    continue
                 self._state_store.add_session(
                     SessionEntity(
-                        host_id = host.id,
-                        session_type = session["session_type"],
-                        privilege_level = session["privilege_level"],
-                        active = session["active"]
+                        host_id=host.id,
+                        session_type=session.get("session_type", "shell"),
+                        privilege_level=session.get("privilege_level", "user"),
+                        active=bool(session.get("active", True)),
                     )
                 )
+            except (KeyError, TypeError) as e:
+                self.events.emit_message(f"Skipping malformed session entry: {e}", "warning")
 
-            for vulnerability in f["vulnerabilities"]:
-                host_ip = vulnerability["host_ip"]
-                host = self._state_store.get_host_by_ip(host_ip)
-
+        # --- Vulnerabilities ---
+        # Note: VulnerabilityEntity has no `service_name` field (only an
+        # optional `service_id`, which we don't reliably have here), so the
+        # service name is folded into the description instead of being
+        # passed as an invalid keyword argument.
+        for vuln in data.get("vulnerabilities", []):
+            try:
+                host = self._state_store.get_host_by_ip(vuln["host_ip"])
+                if host is None:
+                    self.events.emit_message(
+                        f"Skipping vulnerability on unknown host: {vuln.get('host_ip')}", "warning"
+                    )
+                    continue
+                service_name = vuln.get("service_name") or ""
+                description = vuln.get("description", "")
+                full_description = (
+                    f"[{service_name}] {description}" if service_name else description
+                )
                 self._state_store.add_vulnerability(
                     VulnerabilityEntity(
-                        host_id = host.id,
-                        service_name = vulnerability["service_name"],
-                        cve_id = vulnerability["cve_id"],
-                        description = vulnerability["description"],
-                        exploitation_status = vulnerability["exploitation_status"]
+                        host_id=host.id,
+                        cve_id=vuln.get("cve_id") or None,
+                        description=full_description,
+                        exploitation_status=vuln.get("exploitation_status", "discovered"),
                     )
                 )
-
+                evidence = self._classify_evidence(
+                    raw_text, [vuln["host_ip"], service_name, vuln.get("cve_id")]
+                )
                 findings.append(
                     {
-                        "description": f"Potential vulnerability: {vulnerability["description"]}",
-                        "evidence": 0.5,
+                        "description": f"Potential vulnerability: {full_description[:150]}",
+                        "host": vuln["host_ip"],
+                        "evidence": evidence,
                         "type": "hypothesis",
                     }
                 )
-            
-        except:
-            self.events.emit_message("Response was not in JSON format", "error")
+            except (KeyError, TypeError) as e:
+                self.events.emit_message(f"Skipping malformed vulnerability entry: {e}", "warning")
 
         return findings[:10]  # Limit expansion
 
@@ -838,10 +1063,13 @@ class AgentController:
             for flag in detected:
                 if flag not in flags_found:
                     flags_found.append(flag)
-                    #self.sessions.add_flag(flag, msg.content[:200])
+                    self.sessions.add_flag(flag, msg.content[:200])
                     self.events.emit_flag(flag, msg.content[:200])
 
         elif msg.type == MessageType.TOOL_START:
+            if msg.tool_name == "Skill":
+                skill_name = (msg.tool_args or {}).get("skill", "unknown")
+                logger.info(f"Skill invoked: {skill_name}")
             self.events.emit_tool(
                 status="start",
                 name=msg.tool_name or "unknown",
@@ -858,8 +1086,7 @@ class AgentController:
         elif msg.type == MessageType.RESULT:
             cost = msg.metadata.get("cost_usd", 0)
             if cost > 0:
-                #self.sessions.add_cost(cost)
-                x=0
+                self.sessions.add_cost(cost)
 
     def _detect_flags(self, text: str) -> list[str]:
         """Detect potential flags in text."""

@@ -3,7 +3,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from excalibur.core.events import Event, EventBus, EventType         #added
 from enum import Enum
 from typing import Any
 
@@ -84,7 +83,6 @@ class ClaudeCodeBackend(AgentBackend):
         working_directory: str,
         system_prompt: str,
         model: str,
-        events: EventBus,
         permission_mode: str = "bypassPermissions",
     ):
         self._cwd = working_directory
@@ -93,7 +91,6 @@ class ClaudeCodeBackend(AgentBackend):
         self._permission_mode = permission_mode
         self._client: Any = None  # ClaudeSDKClient
         self._session_id: str | None = None
-        self._events: EventBus = events or EventBus.get() #added
 
     async def connect(self) -> None:
         """Connect to Claude Code CLI."""
@@ -129,6 +126,17 @@ class ClaudeCodeBackend(AgentBackend):
             system_prompt=self._system_prompt,
             model=self._model,
             env=env_overrides,
+            # Discover Agent Skills from ~/.claude/skills/ (the composed
+            # Excalibur attack-pattern skills -- kerberoasting, full_port_scan,
+            # etc. -- are installed there at image build time; see Dockerfile).
+            # "user" is used rather than "project" because self._cwd is a
+            # per-engagement workspace directory, not a fixed project root,
+            # so project-level .claude/skills/ wouldn't reliably be found.
+            # `skills` is left unset: per the Agent SDK docs, omitting it
+            # enables all discovered skills automatically, matching CLI
+            # behavior, so every installed Excalibur skill is available
+            # without having to name them here individually.
+            setting_sources=["user"],
         )
         self._client = ClaudeSDKClient(options=options)
         result = self._client.connect()
@@ -237,6 +245,9 @@ class ClaudeCodeBackend(AgentBackend):
             model=self._model,
             resume=session_id,
             env=env_overrides,
+            # See connect() above for why "user" (not "project") and why
+            # `skills` is left unset.
+            setting_sources=["user"],
         )
         self._client = ClaudeSDKClient(options=options)
         result = self._client.connect()

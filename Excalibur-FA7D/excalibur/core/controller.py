@@ -85,7 +85,7 @@ class AgentController:
         self._state_store: Any = None
         self._context_assembler: Any = None
         self._context_compressor: Any = None
-        #self._tool_registry: Any = None
+        self._tool_registry: Any = None
         self._attack_tree: Any = None
 
         # Subscribe to user events
@@ -98,7 +98,7 @@ class AgentController:
         from excalibur.memory.context_compressor import ContextCompressor
         from excalibur.memory.state_store import StateStore
         from excalibur.planner.egats import EGATSPlanner
-        #from excalibur.tools.registry import get_registry
+        from excalibur.tools.registry import get_registry
 
         self._planner = EGATSPlanner(config=self.config.egats_config)
         self._state_store = StateStore(db_path=self.config.state_store_path)
@@ -107,7 +107,7 @@ class AgentController:
             ideal_threshold=self.config.context_ideal_threshold,
             aggressive_threshold=self.config.context_aggressive_threshold,
         )
-        #self._tool_registry = get_registry()
+        self._tool_registry = get_registry()
 
     @property
     def state(self) -> AgentState:
@@ -329,7 +329,7 @@ class AgentController:
         output_parts: list[str] = []
         flags_found: list[str] = []
         tree = self._attack_tree
-        budget = 50#self.config.max_budget
+        budget = self.config.max_budget
 
         # Send initial query
         self.events.emit_message(f"Query(\n" + initial_task + "\n)End Query")  #added

@@ -108,12 +108,13 @@ class EGATSPlanner:
     # ------------------------------------------------------------------
     # TDA & mode
     # ------------------------------------------------------------------
-    #'''
+
     def compute_tdi(
         self,
         node: AttackNode,
         tree: AttackTree,
         context_load: float = 0.0,
+        llm_horizon: float | None = None,
     ) -> TDIScore:
         """Compute and attach the TDI score for *node*.
 
@@ -121,15 +122,17 @@ class EGATSPlanner:
             node: The node to evaluate.
             tree: The full attack tree.
             context_load: Current token-budget utilization (0..1).
+            llm_horizon: Optional LLM-judged horizon estimate (0..1); see
+                ``TDAComputer.compute_tdi`` for details. Falls back to the
+                deterministic tree-depth proxy when ``None``.
 
         Returns:
             The computed ``TDIScore`` (also stored on ``node.tdi``).
         """
-        tdi = self.tda.compute_tdi(node, tree, context_load)
+        tdi = self.tda.compute_tdi(node, tree, context_load, llm_horizon=llm_horizon)
         node.tdi = tdi
         return tdi
-    #'''
-    #'''
+
     def select_mode(self, tdi: TDIScore) -> str:
         """Map a TDI score to an execution mode string.
 
@@ -145,7 +148,7 @@ class EGATSPlanner:
             self.config["bfs_threshold"],
             self.config["dfs_threshold"],
         )
-    #'''
+
     # ------------------------------------------------------------------
     # Tree expansion
     # ------------------------------------------------------------------
@@ -185,7 +188,7 @@ class EGATSPlanner:
             tree.add_node(child)
             new_nodes.append(child)
         return new_nodes
-    #'''
+
     # ------------------------------------------------------------------
     # Backpropagation
     # ------------------------------------------------------------------
@@ -204,8 +207,7 @@ class EGATSPlanner:
             outcome: The observed action outcome.
         """
         backpropagate(tree, node, outcome, self.config["backprop_alpha"])
-    #'''
-    #'''
+
     # ------------------------------------------------------------------
     # Pruning
     # ------------------------------------------------------------------
@@ -228,8 +230,7 @@ class EGATSPlanner:
             ):
                 pruned_ids.extend(prune_branch(tree, node))
         return pruned_ids
-    #'''
-    #'''
+
     # ------------------------------------------------------------------
     # Pivoting & credential propagation
     # ------------------------------------------------------------------
@@ -267,4 +268,3 @@ class EGATSPlanner:
             A list of node IDs that were reopened.
         """
         return propagate_credentials(tree, credentials)
-#'''

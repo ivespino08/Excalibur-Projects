@@ -78,11 +78,9 @@ class ContextAssembler:
             sections.append(state_ctx)
 
         # 3. Mode-specific exploration guidance
-        #'''
         mode_ctx = self._build_mode_context(mode, tdi_value)
         if mode_ctx:
             sections.append(mode_ctx)
-        #'''
 
         # 4. Sibling branch summaries (lateral awareness)
         sibling_ctx = self._build_sibling_context(node, tree)
@@ -158,7 +156,7 @@ class ContextAssembler:
         """Build the state-facts section from the entity store.
 
         Selects facts relevant to the current node's target host
-        (determined via ``node.target_host_id`` or falls back to
+        (determined via ``node.host`` or falls back to
         listing all known entities).
 
         Args:
@@ -167,7 +165,12 @@ class ContextAssembler:
         Returns:
             Formatted state context string.
         """
-        target_host_id: str | None = getattr(node, "target_host_id", None)
+        target_host_ip: str | None = getattr(node, "host", None)
+        target_host_id: str | None = None
+        if target_host_ip:
+            resolved_host = self.state_store.get_host_by_ip(target_host_ip)
+            if resolved_host is not None:
+                target_host_id = resolved_host.id
         lines: list[str] = ["## Known State Facts"]
         has_content = False
 
@@ -247,7 +250,9 @@ class ContextAssembler:
         """Build mode-specific guidance text.
 
         Args:
-            mode: ``"bfs"``, ``"dfs"``, or ``"hybrid"``.
+            mode: ``"reconnaissance"``, ``"exploitation"``, or
+                ``"llm_decide"`` (the values actually produced by
+                :func:`excalibur.planner.mode_selector.select_mode`).
             tdi_value: Current Target Difficulty Index.
 
         Returns:
@@ -255,13 +260,13 @@ class ContextAssembler:
         """
         header = f"## Exploration Mode: {mode.upper()} (TDI={tdi_value:.2f})"
 
-        if mode == "bfs":
+        if mode == "reconnaissance":
             guidance = (
                 "Breadth-first: enumerate all attack surfaces before "
                 "going deep on any single vector. Prioritise discovery "
                 "of new hosts, services, and potential entry points."
             )
-        elif mode == "dfs":
+        elif mode == "exploitation":
             guidance = (
                 "Depth-first: focus on the most promising vector and "
                 "exploit it fully before backtracking. Prioritise "
@@ -307,7 +312,7 @@ class ContextAssembler:
         if parent is None:
             return ""
 
-        sibling_ids = [cid for cid in getattr(parent, "children", []) if cid != node_id]
+        sibling_ids = [cid for cid in getattr(parent, "children_ids", []) if cid != node_id]
 
         if not sibling_ids:
             return ""
