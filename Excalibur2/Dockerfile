@@ -42,6 +42,10 @@ RUN apt-get update && \
     ripgrep \
     # Terminal
     tmux \
+    # Privilege-drop helper (root fixes mounted-volume ownership at
+    # container start, then gosu execs the rest of entrypoint.sh as
+    # pentester -- see entrypoint.sh)
+    gosu \
     && apt-get autoremove -y \
     && apt-get autoclean \
     && rm -rf /var/lib/apt/lists/*
@@ -396,8 +400,11 @@ RUN poetry config virtualenvs.create false && \
     poetry install --only main && \
     chmod +x /home/pentester/entrypoint.sh
 
-# Switch back to pentester user for runtime
-USER pentester
+# NOTE: intentionally staying as root here (not switching back to
+# pentester). The container now starts as root so entrypoint.sh can chown
+# the /workspace bind mount -- which arrives owned by whatever the host
+# Docker daemon created it as (often root, regardless of host OS) -- before
+# dropping down to pentester itself via gosu. See entrypoint.sh.
 
 # Set environment variables
 ENV PYTHONPATH=/app
@@ -406,7 +413,8 @@ ENV PYTHONUNBUFFERED=1
 # Default working directory for penetration tests
 WORKDIR /workspace
 
-# Use entrypoint script for auth setup
+# Use entrypoint script for auth setup. Runs as root; entrypoint.sh drops
+# to pentester after fixing volume ownership.
 ENTRYPOINT ["/home/pentester/entrypoint.sh"]
 
 # Default command - interactive bash

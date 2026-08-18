@@ -4,6 +4,21 @@
 
 set -e
 
+# The container now starts as root (see Dockerfile) specifically so this
+# step can run: /workspace is a host bind mount, and whatever created that
+# directory on the host (Docker Desktop on macOS/Windows, dockerd on
+# Linux) typically leaves it owned by root from the container's point of
+# view. Fix that here, every start, rather than relying on the host user
+# to chown it manually -- this is what makes the fix portable across
+# Linux/macOS/Windows hosts instead of depending on host UID matching.
+if [ "$(id -u)" = "0" ]; then
+    chown -R pentester:pentester /workspace
+
+    # Re-exec this same script as pentester, then everything below runs
+    # unprivileged as originally intended.
+    exec gosu pentester "$0" "$@"
+fi
+
 AUTH_MODE="${EXCALIBUR_AUTH_MODE:-manual}"
 CCR_CONFIG_DIR="/home/pentester/.claude-code-router"
 CCR_CONFIG_FILE="${CCR_CONFIG_DIR}/config.json"
@@ -16,7 +31,7 @@ YELLOW='\033[0;33m'
 NC='\033[0m'
 
 # Router configurations for different modes
-OPENROUTER_ROUTER='{"default":"openrouter,openai/gpt-5.1","background":"openrouter,openai/gpt-5.1","think":"openrouter,openai/gpt-5.1","longContext":"openrouter,openai/gpt-5.1","longContextThreshold":60000,"webSearch":"openrouter,google/gemini-3-pro-preview"}'
+OPENROUTER_ROUTER='{"default":"openrouter,openai/gpt-5","background":"openrouter,openai/gpt-5","think":"openrouter,openai/gpt-5","longContext":"openrouter,openai/gpt-5","longContextThreshold":60000,"webSearch":"openrouter,openai/gpt-5"}'
 LOCAL_ROUTER='{"default":"localLLM,openai/gpt-oss-20b","background":"localLLM,openai/gpt-oss-20b","think":"localLLM,qwen/qwen3-coder-30b","longContext":"localLLM,qwen/qwen3-coder-30b","longContextThreshold":60000,"webSearch":"localLLM,openai/gpt-oss-20b"}'
 
 setup_ccr() {
@@ -44,7 +59,7 @@ setup_ccr() {
     # Substitute Router config based on mode (use | as delimiter to avoid conflicts with /)
     if [ "$mode" = "openrouter" ]; then
         sed -i "s|\"__ROUTER_CONFIG__\"|${OPENROUTER_ROUTER}|g" "$CCR_CONFIG_FILE"
-        local display_model="openai/gpt-5.1"
+        local display_model="openai/gpt-5"
     else
         sed -i "s|\"__ROUTER_CONFIG__\"|${LOCAL_ROUTER}|g" "$CCR_CONFIG_FILE"
         local display_model="localLLM (qwen/qwen3-coder-30b, openai/gpt-oss-20b)"
@@ -52,8 +67,21 @@ setup_ccr() {
 
     echo -e "${BLUE}Starting Claude Code Router...${NC}"
 
-    # Start CCR daemon (nohup to keep it running)
-    nohup ccr start > /tmp/ccr.log 2>&1 &
+    # Start CCR daemon under a supervised restart loop instead of a bare
+    # nohup+&. A bare background process that crashes is gone for the rest
+    # of the container's life with nothing to restart it; this loop
+    # restarts it automatically and appends a timestamped marker each time
+    # it exits, so /tmp/ccr.log becomes a timeline of crashes instead of
+    # just the one-time startup banner.
+    (
+        while true; do
+            ccr start >> /tmp/ccr.log 2>&1
+            exit_code=$?
+            echo "$(date '+%F %T'): CCR exited (code ${exit_code}), restarting in 2s..." >> /tmp/ccr.log
+            sleep 2
+        done
+    ) &
+    echo $! > /tmp/ccr-supervisor.pid
 
     # Wait for CCR to be ready
     sleep 2
