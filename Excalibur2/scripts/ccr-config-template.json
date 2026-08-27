@@ -16,7 +16,12 @@
       "models": [
         "qwen/qwen3.5-9b",
         "openai/gpt-5",
-        "deepseek/deepseek-r1"
+        "z-ai/glm-5.3-flash",
+        "qwen/qwen3.8-27b",
+        "google/gemma-4-26b-a4b-it",
+        "meta-llama/llama-3.1-70b-instruct",
+        "openai/gpt-oss-20b",
+        "deepseek/deepseek-v4-pro"
       ],
       "transformer": {
         "use": ["openrouter", "tooluse"]
