@@ -184,8 +184,9 @@ RUN ARCH=$(dpkg --print-architecture) && \
     gunzip /tmp/chisel.gz && \
     mv /tmp/chisel /usr/local/bin/chisel && \
     chmod +x /usr/local/bin/chisel && \
-    # kerbrute
-    wget -q "https://github.com/ropnop/kerbrute/releases/latest/download/kerbrute_linux_${GOARCH}" -O /usr/local/bin/kerbrute && \
+    # kerbrute -- upstream only publishes an amd64 Linux binary, no arm64,
+    # so pin this one regardless of host arch (runs fine under emulation)
+    wget -q "https://github.com/ropnop/kerbrute/releases/latest/download/kerbrute_linux_amd64" -O /usr/local/bin/kerbrute && \
     chmod +x /usr/local/bin/kerbrute
 
 # Install pip-distributed offensive tools (impacket, ldapdomaindump, wfuzz).
