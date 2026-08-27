@@ -118,6 +118,18 @@ if [[ ! -d "${EXCALIBUR_PROJECT_DIR}/workspace" ]]; then
     log "WARNING: '${EXCALIBUR_PROJECT_DIR}/workspace' not found — check EXCALIBUR_PROJECT_DIR. Debug log retrieval will be skipped/best-effort."
 fi
 
+# Resolve these to absolute paths up front. The loop below does `pushd` into
+# each CVE's own directory to run docker compose, which changes the shell's
+# CWD — any of these left as relative paths would then wrongly resolve
+# relative to the CVE directory instead of where you started the script.
+if [[ -d "$SETUP_SCRIPTS_DIR" ]]; then
+    SETUP_SCRIPTS_DIR="$(cd "$SETUP_SCRIPTS_DIR" && pwd)"
+fi
+if [[ -d "$PRE_SETUP_SCRIPTS_DIR" ]]; then
+    PRE_SETUP_SCRIPTS_DIR="$(cd "$PRE_SETUP_SCRIPTS_DIR" && pwd)"
+fi
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
+
 # --- Build de-duplicated CVE list, preserving first-seen order -------------
 mapfile -t RAW_CVES < <(grep -vE '^\s*(#|$)' "$CVE_LIST_FILE" | sed 's/[[:space:]]*$//')
 declare -A SEEN
