@@ -1,0 +1,2 @@
+electron/CVE-2018-1000006
+Not really exploitable
