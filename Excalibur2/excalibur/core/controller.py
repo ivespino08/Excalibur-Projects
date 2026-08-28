@@ -53,6 +53,12 @@ class AgentController:
         r"\b[a-f0-9]{32}\b",  # 32-char hex (HTB user/root flags)
     ]
 
+    # Prompt-driven success marker. Vulhub targets have no flags, so the
+    # prompt is instructed to print this exact word when it has confirmed
+    # exploitation; matched as a whole word so it won't false-positive on
+    # things like "UNSUCCESSFUL". Change this if the prompt's wording changes.
+    SUCCESS_MARKER: ClassVar[str] = "SUCCESS"
+
     def __init__(
         self,
         config: ExcaliburConfig,
@@ -77,6 +83,7 @@ class AgentController:
         self._state = AgentState.IDLE
         self._pause_requested = False
         self._stop_requested = False
+        self._success_detected = False
         self._resume_event = asyncio.Event()
         self._pending_instruction: str | None = None
 
@@ -286,6 +293,7 @@ class AgentController:
                 "success": True,
                 "output": "\n".join(result["output_parts"]),
                 "flags_found": result["flags_found"],
+                "success_detected": result.get("success_detected", False),
                 "session_id": session.session_id,
                 "cost_usd": session.total_cost_usd,
             }
@@ -344,7 +352,7 @@ class AgentController:
         # compression -- runs identically for this and every later
         # iteration, so the initial exchange is no longer invisible to
         # the attack tree.
-        while budget > 0 and not self._stop_requested:
+        while budget > 0 and not self._stop_requested and not self._success_detected:
             # Check for flags found -> goal reached
             if flags_found:
                 logger.info("Flags found, continuing to verify completeness")
@@ -431,10 +439,18 @@ class AgentController:
                 # Collect text findings for tree expansion
                 if msg.type == MessageType.TEXT and msg.content:
                     iteration_findings.append(msg.content)
+                if self._success_detected:
+                    # Stop consuming this response as soon as the marker
+                    # appears rather than waiting for it to finish streaming.
+                    break
 
             tree.total_actions += 1
             budget -= 1
             tree.budget_remaining = budget
+
+            if self._success_detected:
+                logger.info("Success marker detected — ending EGATS loop early.")
+                break  # skip the summary round-trip / tree bookkeeping below; we're done
 
             # 7b. Ask for a structured JSON summary of new findings, to
             # populate the state store. This is a bookkeeping round-trip,
@@ -519,14 +535,21 @@ class AgentController:
             current_node.status = NodeStatus.COMPLETED
 
         # Finalize
-        if not self._stop_requested:
+        if self._success_detected:
+            self._set_state(AgentState.COMPLETED, f"Success marker '{self.SUCCESS_MARKER}' detected")
+            self.sessions.update_status(SessionStatus.COMPLETED)
+        elif not self._stop_requested:
             self._set_state(AgentState.COMPLETED)
             self.sessions.update_status(SessionStatus.COMPLETED)
         else:
             self._set_state(AgentState.IDLE, "Stopped by user")
             self.sessions.update_status(SessionStatus.PAUSED)
 
-        return {"output_parts": output_parts, "flags_found": flags_found}
+        return {
+            "output_parts": output_parts,
+            "flags_found": flags_found,
+            "success_detected": self._success_detected,
+        }
 
     async def _estimate_horizon_llm(self, node: Any, tree: Any) -> float | None:
         """Ask the model to estimate remaining steps to the goal from *node*.
@@ -1065,6 +1088,17 @@ class AgentController:
                     flags_found.append(flag)
                     self.sessions.add_flag(flag, msg.content[:200])
                     self.events.emit_flag(flag, msg.content[:200])
+
+            # Detect the prompt-driven success marker (used for targets like
+            # vulhub CVEs that have no flag to capture).
+            if not self._success_detected and re.search(
+                rf"\b{re.escape(self.SUCCESS_MARKER)}\b", msg.content
+            ):
+                self._success_detected = True
+                logger.info(f"Success marker '{self.SUCCESS_MARKER}' detected in agent output.")
+                self.events.emit_message(
+                    f"Success marker '{self.SUCCESS_MARKER}' detected — ending run.", "success"
+                )
 
         elif msg.type == MessageType.TOOL_START:
             if msg.tool_name == "Skill":

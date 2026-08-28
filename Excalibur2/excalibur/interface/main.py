@@ -354,13 +354,20 @@ async def run_raw_mode(args: argparse.Namespace) -> None:
         # Print final result
         if result.get("success"):
             flags = result.get("flags_found", [])
+            success_detected = result.get("success_detected", False)
             cost = result.get("cost_usd", 0)
             session_id = result.get("session_id", "")
             print(
-                f"[DONE] Flags: {len(flags)}, Cost: ${cost:.4f}, Session: {session_id}",
+                f"[DONE] Flags: {len(flags)}, Success: {success_detected}, "
+                f"Cost: ${cost:.4f}, Session: {session_id}",
                 flush=True,
             )
-            if not flags:
+            if success_detected:
+                print("[SUCCESS] Success marker detected — target confirmed.", flush=True)
+                # Exit 0: this is a real, distinct success path from the
+                # flag-based CTF one below, for targets (like vulhub CVEs)
+                # that have no flag to capture.
+            elif not flags:
                 print("[WARN] No flags captured", flush=True)
                 sys.exit(1)
         else:
