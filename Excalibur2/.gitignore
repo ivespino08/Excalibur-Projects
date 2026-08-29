@@ -151,11 +151,6 @@ docs/_build/
 profile_default/
 ipython_config.py
 
-<<<<<<< HEAD
-scripts/entrypoint.sh
-scripts/ccr-congig-template.json
-=======
 
 scripts/entrypoint.sh
 benchmark/
->>>>>>> c1859adfd1ed429da7e2fc52066f26b2066d10a1

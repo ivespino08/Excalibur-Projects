@@ -19,7 +19,7 @@ set -uo pipefail
 # ---------------------------------------------------------------------------
 
 # Path to your local clone of vulhub (contains dirs like activemq/CVE-2015-5254)
-VULHUB_DIR="${VULHUB_DIR:-/path/to/vulhub}"
+VULHUB_DIR="${VULHUB_DIR:-$HOME/Desktop/vulhub}"
 
 # Plain text file, one CVE folder per line, optionally with :PORT appended
 # to scope excalibur's scan to just that port instead of letting it
@@ -54,14 +54,22 @@ STARTUP_GRACE="${STARTUP_GRACE:-15}"
 # itself) or host.docker.internal (not guaranteed to resolve in every VM
 # networking setup). Since only one CVE's containers are ever up at a time
 # in this script, scanning the whole VM is unambiguous.
-DEFAULT_HOST="${DEFAULT_HOST:-CHANGE_ME_VM_IP}"
+DEFAULT_HOST="${DEFAULT_HOST:-192.168.181.157}"
 
 # Name of the already-running excalibur container (per docker-compose.yml's
 # container_name), and the host-side path to that project's directory (the
 # one containing its docker-compose.yml). The latter is used to read the
 # real debug log out of the bind-mounted ./workspace directory.
 EXCALIBUR_CONTAINER="${EXCALIBUR_CONTAINER:-excalibur2}"
-EXCALIBUR_PROJECT_DIR="${EXCALIBUR_PROJECT_DIR:-/path/to/excalibur/project}"
+EXCALIBUR_PROJECT_DIR="${EXCALIBUR_PROJECT_DIR:-$HOME/Desktop/Excalibur-Projects/Excalibur2}"
+
+# `docker exec` bypasses entrypoint.sh's root->pentester privilege drop (that
+# only happens for the container's PID 1), so it defaults to root unless we
+# tell it otherwise. Claude Code refuses to run with permission_mode
+# "bypassPermissions" (--dangerously-skip-permissions) as root, so this must
+# match the non-root user entrypoint.sh normally drops to (see the
+# claude-config volume mount path in docker-compose.yml: /home/pentester/...).
+EXCALIBUR_USER="${EXCALIBUR_USER:-pentester}"
 
 # Directory holding optional per-CVE scripts that must run BEFORE
 # `docker compose up -d`. Naming: pre_setup_scripts/<cve with '/' -> '_'>.sh
@@ -173,7 +181,7 @@ run_excalibur() {
     local extra_info="$2"
     local log_file="$3"
 
-    local exec_cmd=(docker exec -i "$EXCALIBUR_CONTAINER" excalibur --raw -d -t "$target")
+    local exec_cmd=(docker exec -i -u "$EXCALIBUR_USER" "$EXCALIBUR_CONTAINER" excalibur --raw -d -t "$target")
     if [[ -n "$extra_info" ]]; then
         exec_cmd+=(-i "$extra_info")
     fi
@@ -188,7 +196,7 @@ run_excalibur() {
         elapsed=$((elapsed + POLL_INTERVAL))
         if (( elapsed >= RUN_DURATION )); then
             timed_out=1
-            log "Time limit (${RUN_DURATION}s) reached — killing excalibur inside ${EXCALIBUR_CONTAINER}..."
+            log "Time limit (${RUN_DURATION}s) reached — killing excalibur inside ${EXCALIBUR_CONTAINER}..." >&2
             # Best-effort: requires pgrep/pkill (procps) inside the container image.
             docker exec "$EXCALIBUR_CONTAINER" pkill -f "excalibur --raw -d -t ${target}" >/dev/null 2>&1
             sleep 3
