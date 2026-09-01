@@ -19,7 +19,7 @@ set -uo pipefail
 # ---------------------------------------------------------------------------
 
 # Path to your local clone of vulhub (contains dirs like activemq/CVE-2015-5254)
-VULHUB_DIR="${VULHUB_DIR:-$HOME/Desktop/vulhub}"
+VULHUB_DIR="${VULHUB_DIR:-/path/to/vulhub}"
 
 # Plain text file, one CVE folder per line, optionally with :PORT appended
 # to scope excalibur's scan to just that port instead of letting it
@@ -54,14 +54,14 @@ STARTUP_GRACE="${STARTUP_GRACE:-15}"
 # itself) or host.docker.internal (not guaranteed to resolve in every VM
 # networking setup). Since only one CVE's containers are ever up at a time
 # in this script, scanning the whole VM is unambiguous.
-DEFAULT_HOST="${DEFAULT_HOST:-192.168.181.157}"
+DEFAULT_HOST="${DEFAULT_HOST:-CHANGE_ME_VM_IP}"
 
 # Name of the already-running excalibur container (per docker-compose.yml's
 # container_name), and the host-side path to that project's directory (the
 # one containing its docker-compose.yml). The latter is used to read the
 # real debug log out of the bind-mounted ./workspace directory.
 EXCALIBUR_CONTAINER="${EXCALIBUR_CONTAINER:-excalibur2}"
-EXCALIBUR_PROJECT_DIR="${EXCALIBUR_PROJECT_DIR:-$HOME/Desktop/Excalibur-Projects/Excalibur2}"
+EXCALIBUR_PROJECT_DIR="${EXCALIBUR_PROJECT_DIR:-/path/to/excalibur/project}"
 
 # `docker exec` bypasses entrypoint.sh's root->pentester privilege drop (that
 # only happens for the container's PID 1), so it defaults to root unless we
@@ -83,9 +83,33 @@ PRE_SETUP_SCRIPTS_DIR="${PRE_SETUP_SCRIPTS_DIR:-./pre_setup_scripts}"
 # Exit non-zero to abort that CVE (treated like a failed compose up).
 SETUP_SCRIPTS_DIR="${SETUP_SCRIPTS_DIR:-./setup_scripts}"
 
+# Whether to wipe /tmp and /workspace inside the excalibur container before
+# each run. Since EXCALIBUR_CONTAINER is one persistent container reused
+# across every CVE (not a fresh one per run), scan output, downloaded
+# payloads, and notes the agent writes to these scratch locations otherwise
+# persist and can bias/mislead the *next* CVE's run. Set to "false" only if
+# you specifically want cross-run continuity for some other reason.
+CLEAN_STATE_BEFORE_RUN="${CLEAN_STATE_BEFORE_RUN:-true}"
+
 # Extra seconds to wait after a per-CVE setup script finishes, on top of
 # STARTUP_GRACE, before target detection / excalibur runs.
 POST_SETUP_GRACE="${POST_SETUP_GRACE:-0}"
+
+# Whether `docker compose down` also removes the images and volumes that
+# CVE's stack used, instead of just stopping/removing containers+networks.
+# Vulhub compose files typically `build:` a fresh image (or pull a pinned
+# version) per CVE, and none of that gets reclaimed by a plain `down` — with
+# 50 different CVEs this adds up fast. Set to "false" if you'd rather keep
+# images cached (e.g. re-running the same list repeatedly) at the cost of
+# disk space.
+REMOVE_IMAGES_AFTER_DOWN="${REMOVE_IMAGES_AFTER_DOWN:-true}"
+
+# Every N CVEs, run a full `docker system prune` as a catch-all for anything
+# per-project `compose down` doesn't reach — build cache, dangling layers
+# from failed/partial builds, unused networks. 0 disables this. This is
+# VM-wide (not scoped to vulhub), but safe: images/containers still in use
+# (like the running excalibur2 container) are never touched by prune.
+PRUNE_EVERY_N_CVES="${PRUNE_EVERY_N_CVES:-5}"
 
 # ---------------------------------------------------------------------------
 # END CONFIG
@@ -170,6 +194,47 @@ if [[ -f "$OVERRIDES_FILE" ]]; then
     done < "$OVERRIDES_FILE"
     log "Loaded overrides from $OVERRIDES_FILE"
 fi
+
+# --- Helper: tear down a CVE's stack thoroughly, reclaiming disk -----------
+compose_down_cleanup() {
+    local log_target="$1"  # file to append output to, or "-" for /dev/null
+    local down_flags=(-v)  # always drop volumes (DB state, etc.)
+    if [[ "$REMOVE_IMAGES_AFTER_DOWN" == "true" ]]; then
+        down_flags+=(--rmi all)
+    fi
+    if [[ "$log_target" == "-" ]]; then
+        docker compose down "${down_flags[@]}" >/dev/null 2>&1
+    else
+        docker compose down "${down_flags[@]}" >>"$log_target" 2>&1
+    fi
+}
+
+log_disk_usage() {
+    log "Disk usage: $(df -h / | awk 'NR==2 {print $3" used / "$2" total ("$5" full)"}')"
+}
+
+maybe_prune_system() {
+    if [[ "$PRUNE_EVERY_N_CVES" -gt 0 && $(( INDEX % PRUNE_EVERY_N_CVES )) -eq 0 ]]; then
+        log "Running periodic 'docker system prune' (every ${PRUNE_EVERY_N_CVES} CVEs)..."
+        log_disk_usage
+        docker system prune -af --volumes >/dev/null 2>&1
+        log "Prune complete."
+        log_disk_usage
+    fi
+}
+
+# --- Helper: wipe /tmp and /workspace inside the container ------------------
+clean_container_state() {
+    if [[ "$CLEAN_STATE_BEFORE_RUN" != "true" ]]; then
+        return
+    fi
+    log "Cleaning /tmp and /workspace inside ${EXCALIBUR_CONTAINER} (avoid cross-run contamination)..."
+    docker exec "$EXCALIBUR_CONTAINER" sh -c '
+        rm -rf /tmp/* /tmp/.[!.]* 2>/dev/null
+        find /workspace -mindepth 1 -delete 2>/dev/null
+        true
+    ' >/dev/null 2>&1
+}
 
 # --- Helper: run excalibur inside the container with a manual timeout ------
 # We poll rather than trusting `timeout` on the local `docker exec` client,
@@ -289,7 +354,7 @@ for cve in "${CVES[@]}"; do
     if ! docker compose up -d >>"${result_dir}/compose_up.log" 2>&1; then
         log "SKIP: docker compose up failed for $cve"
         echo "status=compose_up_failed" >> "$meta_file"
-        docker compose down >/dev/null 2>&1
+        compose_down_cleanup "-"
         popd >/dev/null
         continue
     fi
@@ -330,7 +395,7 @@ for cve in "${CVES[@]}"; do
     if [[ $setup_failed -eq 1 ]]; then
         log "SKIP: setup failed for $cve, tearing down and moving on."
         echo "status=setup_failed" >> "$meta_file"
-        docker compose down >>"${result_dir}/compose_down.log" 2>&1
+        compose_down_cleanup "${result_dir}/compose_down.log"
         popd >/dev/null
         continue
     fi
@@ -353,6 +418,8 @@ for cve in "${CVES[@]}"; do
     fi
 
     extra_info="${OVERRIDE_INFO[$cve_folder]:-}"
+
+    clean_container_state
 
     log "Target resolved to $target. Running excalibur for up to ${RUN_DURATION}s..."
     {
@@ -384,9 +451,11 @@ for cve in "${CVES[@]}"; do
     fi
 
     log "Tearing environment down..."
-    docker compose down >>"${result_dir}/compose_down.log" 2>&1
+    compose_down_cleanup "${result_dir}/compose_down.log"
 
     popd >/dev/null
+
+    maybe_prune_system
 
     log "Done with $cve. Console output: $log_file"
 done
