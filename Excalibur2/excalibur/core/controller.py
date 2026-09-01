@@ -864,6 +864,85 @@ class AgentController:
             return 0.5
         return 0.3
 
+    def _parse_json_summary(self, text: str) -> dict[str, Any] | None:
+        """Parse SUMMARY_PROMPT's response into a JSON object, tolerantly.
+
+        Claude models reliably return bare JSON when asked to. Other models
+        routed through openrouter/ccr (e.g. GPT-5) are much less consistent
+        about this -- commonly wrapping the object in a ```json ... ```
+        markdown fence, or prefacing it with a sentence of commentary even
+        when explicitly told not to. Try progressively more lenient
+        strategies before giving up, so a formatting quirk doesn't silently
+        drop an iteration's findings.
+
+        Args:
+            text: The combined, stripped text of the backend's response.
+
+        Returns:
+            The parsed JSON object, or None if no strategy could extract
+            valid JSON matching the expected schema (a dict).
+        """
+        import json
+
+        # 1. Bare JSON (the expected/common case).
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        # 2. Markdown code fence: ```json ... ``` or ``` ... ```
+        fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+        if fence_match:
+            try:
+                parsed = json.loads(fence_match.group(1).strip())
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+
+        # 3. Leading/trailing prose around a single JSON object: scan for the
+        # first '{' and find its matching '}' by tracking brace depth
+        # (string-aware, so braces inside quoted values don't miscount).
+        start = text.find("{")
+        if start != -1:
+            depth = 0
+            in_string = False
+            escape = False
+            for idx in range(start, len(text)):
+                ch = text[idx]
+                if in_string:
+                    if escape:
+                        escape = False
+                    elif ch == "\\":
+                        escape = True
+                    elif ch == '"':
+                        in_string = False
+                    continue
+                if ch == '"':
+                    in_string = True
+                elif ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[start : idx + 1]
+                        try:
+                            parsed = json.loads(candidate)
+                            if isinstance(parsed, dict):
+                                return parsed
+                        except json.JSONDecodeError:
+                            pass
+                        break
+
+        self.events.emit_message(
+            "Summary response was not valid JSON (tried bare, fenced, and "
+            "extracted-object parsing)",
+            "error",
+        )
+        return None
+
     def _extract_json_findings(
         self,
         summary_parts: list[str],
@@ -903,7 +982,6 @@ class AgentController:
             SessionEntity,
             VulnerabilityEntity,
         )
-        import json
 
         raw_text = "".join(raw_action_text) if raw_action_text else ""
 
@@ -916,10 +994,8 @@ class AgentController:
         if not combined:
             return findings
 
-        try:
-            data = json.loads(combined)
-        except json.JSONDecodeError as e:
-            self.events.emit_message(f"Summary response was not valid JSON: {e}", "error")
+        data = self._parse_json_summary(combined)
+        if data is None:
             return findings
 
         if self._state_store is None:
