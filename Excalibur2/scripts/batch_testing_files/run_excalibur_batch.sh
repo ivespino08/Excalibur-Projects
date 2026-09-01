@@ -246,10 +246,28 @@ run_excalibur() {
     local extra_info="$2"
     local log_file="$3"
 
-    local exec_cmd=(docker exec -i -u "$EXCALIBUR_USER" "$EXCALIBUR_CONTAINER" excalibur --raw -d -t "$target")
+    # entrypoint.sh exports the auth env vars openrouter/local mode needs
+    # (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN) into its own shell and into
+    # ~/.bashrc via `eval "$(ccr activate)"` — neither of which a plain
+    # `docker exec excalibur ...` (no shell) picks up. Neither `bash -l`
+    # nor explicitly `source ~/.bashrc` from a non-interactive shell work
+    # here: this image's ~/.bashrc opens with the standard Debian/Ubuntu
+    # guard clause (`case $- in *i*) ;; *) return;; esac`) that exits
+    # immediately unless the invoking shell is itself interactive. `bash -i`
+    # both satisfies that guard AND auto-sources ~/.bashrc for non-login
+    # interactive shells, so that's what actually gets the ccr activation
+    # to run. Harmless for anthropic/manual modes, which don't add any ccr
+    # activation to .bashrc in the first place. Without a real TTY this can
+    # print harmless job-control warnings ("cannot set terminal process
+    # group", "no job control in this shell") to stderr, which land in
+    # log_file as noise but don't affect execution.
+    local remote_cmd
+    remote_cmd=$(printf 'excalibur --raw -d -t %q' "$target")
     if [[ -n "$extra_info" ]]; then
-        exec_cmd+=(-i "$extra_info")
+        remote_cmd+=$(printf ' -i %q' "$extra_info")
     fi
+
+    local exec_cmd=(docker exec -i -u "$EXCALIBUR_USER" "$EXCALIBUR_CONTAINER" bash -ic "$remote_cmd")
 
     "${exec_cmd[@]}" >"$log_file" 2>&1 &
     local pid=$!
