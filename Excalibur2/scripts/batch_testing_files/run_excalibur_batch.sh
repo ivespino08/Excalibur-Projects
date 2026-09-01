@@ -37,8 +37,8 @@ OVERRIDES_FILE="${OVERRIDES_FILE:-./cve_overrides.txt}"
 # Where logs/results get written (one subfolder per CVE)
 OUTPUT_DIR="${OUTPUT_DIR:-./excalibur_results}"
 
-# How long excalibur gets to run against each target, in seconds (20 min)
-RUN_DURATION="${RUN_DURATION:-1200}"
+# How long excalibur gets to run against each target, in seconds (15 min)
+RUN_DURATION="${RUN_DURATION:-900}"
 
 # How often (seconds) to poll whether the excalibur run has finished
 POLL_INTERVAL="${POLL_INTERVAL:-5}"
