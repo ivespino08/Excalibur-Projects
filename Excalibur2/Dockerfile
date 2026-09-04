@@ -78,13 +78,16 @@ RUN apt-get update && \
     sshpass \
     proxychains4 \
     socat \
-    # Ruby + native-extension build deps (evil-winrm gem needs these for nokogiri)
+    # Ruby + native-extension build deps (evil-winrm gem needs these for
+    # nokogiri, plus libreadline-dev for the readline-ext gem its
+    # interactive shell pulls in)
     ruby-full \
     ruby-dev \
     libxml2-dev \
     libxslt1-dev \
     zlib1g-dev \
     libssl-dev \
+    libreadline-dev \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
