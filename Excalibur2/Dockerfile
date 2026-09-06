@@ -6,6 +6,14 @@ FROM ubuntu:24.04
 LABEL description="Excalibur - AI-Powered Penetration Testing Agent"
 LABEL version="1.0.0"
 
+# Use bash with pipefail for all RUN steps below. Without this, a command
+# like `curl ... | bash -` in the default /bin/sh -c reports success even
+# when curl fails (the pipeline's exit code is bash's, which gets empty
+# input and exits 0) -- the real failure then surfaces confusingly later,
+# e.g. as "Unable to locate package nodejs" instead of a clear network/curl
+# error at the actual point of failure.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # Prevent interactive prompts during build
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -385,6 +393,7 @@ COPY --chown=pentester:pentester pyproject.toml README.md /app/
 COPY --chown=pentester:pentester excalibur/ /app/excalibur/
 COPY --chown=pentester:pentester scripts/entrypoint.sh /home/pentester/entrypoint.sh
 COPY --chown=pentester:pentester scripts/ccr-config-template.json /app/scripts/ccr-config-template.json
+COPY --chown=pentester:pentester scripts/force-reasoning-transformer.js /app/scripts/force-reasoning-transformer.js
 
 # Install the composed attack-pattern Agent Skills (kerberoasting,
 # full_port_scan, etc.) as user Skills so the Claude Agent SDK discovers
