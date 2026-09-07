@@ -8,45 +8,52 @@
 // variability means you can't reliably guarantee ALL requests go one way
 // or the other just from the router config.
 //
-// This transformer forces `reasoning: { enabled: <bool> }` unconditionally,
+// This transformer forces `reasoning` to a specific value per model,
 // overriding whatever the built-in "openrouter" transformer set (or left
 // unset). Register it AFTER "openrouter" (and after "tooluse") in a
 // provider's transformer.use list so it runs after that translation has
 // already happened, not before.
 //
+// IMPORTANT: not all reasoning-capable models accept the same values here.
+// "Hybrid" models (e.g. Qwen3.5's family) have a genuine on/off switch --
+// `{ enabled: false }` cleanly disables reasoning. "Mandatory reasoning"
+// models (e.g. OpenAI's GPT-OSS family) do NOT -- OpenRouter's own docs
+// say these reject `effort: "none"` / an explicit disable outright rather
+// than silently ignoring it. For those, the closest you can get is turning
+// effort down to "low", not off. Sending the wrong shape to a mandatory
+// model will likely fail every request with an HTTP 400, not just no-op --
+// hence per-model rules below rather than one blanket setting for
+// everything.
+//
 // Config (in config.json's top-level "transformers" array):
 //   {
 //     "path": "...",
 //     "options": {
-//       "enabled": false,                 // true forces reasoning ON for
-//                                          // every request; false forces
-//                                          // it OFF. Required.
-//       "models": ["qwen/qwen3.5-9b"]     // optional; omit to apply to
-//                                          // every request that reaches
-//                                          // this transformer regardless
-//                                          // of model.
+//       "rules": [
+//         { "models": ["qwen/qwen3.5-9b"], "reasoning": { "enabled": false } },
+//         { "models": ["openai/gpt-oss-20b", "openai/gpt-oss-120b"],
+//           "reasoning": { "effort": "low" } }
+//       ]
 //     }
 //   }
-//
-// Note: forcing `enabled: true` for every request -- including simple
-// background/tool-use steps that don't need it -- means every single call
-// pays reasoning-token cost and latency, not just the requests Claude Code
-// itself would have flagged as think-worthy. That's the whole point if
-// you're deliberately testing "always thinking," but worth knowing before
-// running a full 50-CVE batch this way.
+// The first rule whose "models" list includes the request's model wins.
+// Requests for a model not listed in any rule pass through unmodified.
 class ForceReasoningTransformer {
   name = "force-reasoning";
 
   constructor(options = {}) {
-    this.enabled = options.enabled === true;
-    this.models = Array.isArray(options.models) ? options.models : null;
+    this.rules = Array.isArray(options.rules) ? options.rules : [];
   }
 
   async transformRequestIn(request) {
-    if (this.models && !this.models.includes(request.model)) {
-      return request;
+    for (const rule of this.rules) {
+      if (Array.isArray(rule.models) && rule.models.includes(request.model)) {
+        if (rule.reasoning) {
+          request.reasoning = rule.reasoning;
+        }
+        break;
+      }
     }
-    request.reasoning = { enabled: this.enabled };
     return request;
   }
 }

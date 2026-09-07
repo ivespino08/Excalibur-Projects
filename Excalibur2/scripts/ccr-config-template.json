@@ -10,7 +10,12 @@
   "transformers": [
     {
       "path": "/app/scripts/force-reasoning-transformer.js",
-      "options": { "enabled": false, "models": ["qwen/qwen3.5-9b"] }
+      "options": {
+        "rules": [
+          { "models": ["qwen/qwen3.5-9b"], "reasoning": { "enabled": false } },
+          { "models": ["openai/gpt-oss-20b", "openai/gpt-oss-120b"], "reasoning": { "effort": "low" } }
+        ]
+      }
     }
   ],
   "Providers": [
