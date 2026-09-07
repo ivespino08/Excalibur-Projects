@@ -31,7 +31,7 @@ YELLOW='\033[0;33m'
 NC='\033[0m'
 
 # Router configurations for different modes
-OPENROUTER_ROUTER='{"default":"openrouter,openai/gpt-5","background":"openrouter,openai/gpt-5","think":"openrouter,openai/gpt-5","longContext":"openrouter,openai/gpt-5","longContextThreshold":60000,"webSearch":"openrouter,openai/gpt-5"}'
+OPENROUTER_ROUTER='{"default":"openrouter,openai/gpt-oss-20b","background":"openrouter,openai/gpt-oss-20b","think":"openrouter,openai/gpt-oss-20b","longContext":"openrouter,openai/gpt-oss-20b","longContextThreshold":60000,"webSearch":"openrouter,openai/gpt-oss-20b"}'
 LOCAL_ROUTER='{"default":"localLLM,openai/gpt-oss-20b","background":"localLLM,openai/gpt-oss-20b","think":"localLLM,qwen/qwen3-coder-30b","longContext":"localLLM,qwen/qwen3-coder-30b","longContextThreshold":60000,"webSearch":"localLLM,openai/gpt-oss-20b"}'
 
 setup_ccr() {
@@ -59,7 +59,7 @@ setup_ccr() {
     # Substitute Router config based on mode (use | as delimiter to avoid conflicts with /)
     if [ "$mode" = "openrouter" ]; then
         sed -i "s|\"__ROUTER_CONFIG__\"|${OPENROUTER_ROUTER}|g" "$CCR_CONFIG_FILE"
-        local display_model="openai/gpt-5"
+        local display_model="deepseek/deepseek-v4-pro"
     else
         sed -i "s|\"__ROUTER_CONFIG__\"|${LOCAL_ROUTER}|g" "$CCR_CONFIG_FILE"
         local display_model="localLLM (qwen/qwen3-coder-30b, openai/gpt-oss-20b)"

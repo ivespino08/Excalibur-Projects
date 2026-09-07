@@ -19,7 +19,7 @@ set -uo pipefail
 # ---------------------------------------------------------------------------
 
 # Path to your local clone of vulhub (contains dirs like activemq/CVE-2015-5254)
-VULHUB_DIR="${VULHUB_DIR:-/path/to/vulhub}"
+VULHUB_DIR="${VULHUB_DIR:-$HOME/Desktop/vulhub}"
 
 # Plain text file, one CVE folder per line, optionally with :PORT appended
 # to scope excalibur's scan to just that port instead of letting it
@@ -54,14 +54,14 @@ STARTUP_GRACE="${STARTUP_GRACE:-15}"
 # itself) or host.docker.internal (not guaranteed to resolve in every VM
 # networking setup). Since only one CVE's containers are ever up at a time
 # in this script, scanning the whole VM is unambiguous.
-DEFAULT_HOST="${DEFAULT_HOST:-CHANGE_ME_VM_IP}"
+DEFAULT_HOST="${DEFAULT_HOST:-10.0.2.15}"
 
 # Name of the already-running excalibur container (per docker-compose.yml's
 # container_name), and the host-side path to that project's directory (the
 # one containing its docker-compose.yml). The latter is used to read the
 # real debug log out of the bind-mounted ./workspace directory.
 EXCALIBUR_CONTAINER="${EXCALIBUR_CONTAINER:-excalibur2}"
-EXCALIBUR_PROJECT_DIR="${EXCALIBUR_PROJECT_DIR:-/path/to/excalibur/project}"
+EXCALIBUR_PROJECT_DIR="${EXCALIBUR_PROJECT_DIR:-$HOME/Desktop/Excalibur-Projects/Excalibur2}"
 
 # `docker exec` bypasses entrypoint.sh's root->pentester privilege drop (that
 # only happens for the container's PID 1), so it defaults to root unless we
