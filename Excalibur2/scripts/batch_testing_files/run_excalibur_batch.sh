@@ -37,8 +37,8 @@ OVERRIDES_FILE="${OVERRIDES_FILE:-./cve_overrides.txt}"
 # Where logs/results get written (one subfolder per CVE)
 OUTPUT_DIR="${OUTPUT_DIR:-./excalibur_results}"
 
-# How long excalibur gets to run against each target, in seconds (15 min)
-RUN_DURATION="${RUN_DURATION:-900}"
+# How long excalibur gets to run against each target, in seconds (20 min)
+RUN_DURATION="${RUN_DURATION:-1200}"
 
 # How often (seconds) to poll whether the excalibur run has finished
 POLL_INTERVAL="${POLL_INTERVAL:-5}"
@@ -224,13 +224,22 @@ maybe_prune_system() {
 }
 
 # --- Helper: wipe /tmp and /workspace inside the container ------------------
+# Excludes ccr's own persistent daemon files (ccr.log, ccr-supervisor.pid).
+# ccr starts once at container boot and keeps running across every CVE in
+# the batch -- deleting its log out from under it doesn't stop it running,
+# but does silently orphan the file (still written to via its open fd, just
+# invisible to ls/cat/grep by path -- recoverable via
+# /proc/<ccr-pid>/fd/1 if it's already happened, but better not to cause it).
 clean_container_state() {
     if [[ "$CLEAN_STATE_BEFORE_RUN" != "true" ]]; then
         return
     fi
     log "Cleaning /tmp and /workspace inside ${EXCALIBUR_CONTAINER} (avoid cross-run contamination)..."
     docker exec "$EXCALIBUR_CONTAINER" sh -c '
-        rm -rf /tmp/* /tmp/.[!.]* 2>/dev/null
+        find /tmp -mindepth 1 \
+            ! -name "ccr.log" \
+            ! -name "ccr-supervisor.pid" \
+            -exec rm -rf {} + 2>/dev/null
         find /workspace -mindepth 1 -delete 2>/dev/null
         true
     ' >/dev/null 2>&1
