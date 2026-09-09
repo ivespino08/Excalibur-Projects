@@ -7,7 +7,17 @@
   "APIKEY": "",
   "API_TIMEOUT_MS": "600000",
   "PROXY_URL": "",
-  "transformers": [],
+  "transformers": [
+    {
+      "path": "/app/scripts/force-reasoning-transformer.js",
+      "options": {
+        "rules": [
+          { "models": ["qwen/qwen3.5-9b"], "reasoning": { "enabled": false } },
+          { "models": ["openai/gpt-oss-20b", "openai/gpt-oss-120b"], "reasoning": { "effort": "low" } }
+        ]
+      }
+    }
+  ],
   "Providers": [
     {
       "name": "openrouter",
@@ -24,7 +34,7 @@
         "deepseek/deepseek-v4-pro"
       ],
       "transformer": {
-        "use": ["openrouter", "tooluse"]
+        "use": ["openrouter", "tooluse", "force-reasoning"]
       }
     },
     {
