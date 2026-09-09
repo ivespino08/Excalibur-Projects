@@ -112,7 +112,6 @@ workspace/*
 *.ovpn
 
 # Logs
-*.log
 logs/
 
 # Environment
