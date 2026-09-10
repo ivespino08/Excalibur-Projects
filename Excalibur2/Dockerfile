@@ -74,6 +74,12 @@ RUN apt-get update && \
     john \
     # Network scanning
     masscan \
+    # L2/route discovery -- arp-scan for host discovery on a directly
+    # reachable subnet, traceroute/mtr for diagnosing where a hop dies
+    # across routed segments
+    arp-scan \
+    traceroute \
+    mtr-tiny \
     # SMB/Samba enumeration -- enum4linux itself is NOT an apt package on
     # Ubuntu (only Kali packages it); these are its real dependencies
     # (nmblookup/smbclient from smbclient, net/rpcclient from
@@ -82,10 +88,14 @@ RUN apt-get update && \
     samba-common-bin \
     # Network analysis
     tcpdump \
+    tshark \
     # Additional utilities
     sshpass \
     proxychains4 \
     socat \
+    # Pivoting -- full-subnet routing over an SSH foothold (lighter-weight
+    # alternative to chisel's SOCKS-proxy model when SSH is available)
+    sshuttle \
     # Ruby + native-extension build deps (evil-winrm gem needs these for
     # nokogiri, plus libreadline-dev for the readline-ext gem its
     # interactive shell pulls in)
@@ -282,6 +292,16 @@ RUN git clone --depth 1 https://github.com/CiscoCXSecurity/enum4linux.git /opt/e
     ln -s /opt/enum4linux/enum4linux.pl /usr/local/bin/enum4linux && \
     chmod +x /opt/enum4linux/enum4linux.pl && \
     chmod -R a+rX /opt/enum4linux
+
+# Install routersploit (router/embedded-device exploitation framework) from
+# its actual upstream -- the project's own docs install this way rather
+# than via pip, since the PyPI package lags the repo. Wrapped to match the
+# "routersploit" command name (rsf.py is the actual entrypoint).
+RUN git clone --depth 1 https://github.com/threat9/routersploit.git /opt/routersploit && \
+    pip install --no-cache-dir --break-system-packages -r /opt/routersploit/requirements.txt && \
+    printf '#!/bin/sh\nexec python3 /opt/routersploit/rsf.py "$@"\n' > /usr/local/bin/routersploit && \
+    chmod +x /usr/local/bin/routersploit && \
+    chmod -R a+rX /opt/routersploit
 
 # Fetch Windows/AD offensive binaries and scripts for upload to compromised
 # Windows/AD targets (same pattern as linpeas above -- these run on the
