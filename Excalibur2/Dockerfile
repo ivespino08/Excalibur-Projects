@@ -19,8 +19,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Update and install system dependencies
 RUN apt-get update && \
-    apt-get upgrade -y && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
     # Build essentials
     build-essential \
     software-properties-common \
@@ -60,7 +59,7 @@ RUN apt-get update && \
 
 # Install additional security/pentesting tools
 RUN apt-get update && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
     # Web fuzzing/brute-forcing
     gobuster \
     dirb \
@@ -262,7 +261,7 @@ RUN rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED && \
 # is removed again afterward since nothing needs it at runtime.
 ENV PIPX_HOME=/opt/pipx
 ENV PIPX_BIN_DIR=/usr/local/bin
-RUN apt-get update && apt-get install -y pipx && rm -rf /var/lib/apt/lists/* && \
+RUN apt-get update && apt-get install -y --no-install-recommends pipx && rm -rf /var/lib/apt/lists/* && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal && \
     . /root/.cargo/env && \
     pipx install git+https://github.com/Pennyw0rth/NetExec && \
@@ -349,7 +348,7 @@ RUN mkdir -p /opt/ad-tools && \
 
 # Install Node.js v20 (required for Claude Code CLI)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
+    apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
 # Remove EXTERNALLY-MANAGED marker to allow pip/poetry in Docker
