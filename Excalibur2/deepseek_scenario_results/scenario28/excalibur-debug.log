@@ -1,0 +1,6 @@
+2026-09-18 10:22:04,684 [INFO] excalibur.core.langfuse: Langfuse telemetry initialized (user: be1022c7...)
+2026-09-18 10:22:04,684 [DEBUG] asyncio: Using selector: EpollSelector
+2026-09-18 10:22:04,718 [DEBUG] excalibur.core.langfuse: Langfuse session pending for target: 10.254.200.0/24
+2026-09-18 10:22:05,530 [INFO] claude_agent_sdk._internal.transport.subprocess_cli: Using bundled Claude Code CLI: /usr/local/lib/python3.12/dist-packages/claude_agent_sdk/_bundled/claude
+2026-09-18 10:42:32,913 [DEBUG] claude_agent_sdk._internal.query: Read task cancelled
+2026-09-18 10:42:32,955 [DEBUG] excalibur.core.langfuse: Langfuse: flushing and shutting down

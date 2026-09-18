@@ -1,0 +1,25 @@
+2026-09-17 18:22:57,291 [INFO] excalibur.core.langfuse: Langfuse telemetry initialized (user: 9cb6b0be...)
+2026-09-17 18:22:57,291 [DEBUG] asyncio: Using selector: EpollSelector
+2026-09-17 18:22:57,325 [DEBUG] excalibur.core.langfuse: Langfuse session pending for target: 10.254.200.0/24
+2026-09-17 18:22:58,197 [INFO] claude_agent_sdk._internal.transport.subprocess_cli: Using bundled Claude Code CLI: /usr/local/lib/python3.12/dist-packages/claude_agent_sdk/_bundled/claude
+2026-09-17 18:30:07,182 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:30:37,183 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:31:07,186 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:31:37,187 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:32:07,188 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:32:37,189 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:33:07,190 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:33:37,190 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:34:07,191 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:35:15,585 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:35:45,584 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:36:15,585 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:36:45,585 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:37:15,586 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:37:45,587 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:38:15,589 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:38:45,588 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:39:15,588 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:39:45,588 [DEBUG] claude_agent_sdk._internal.message_parser: Skipping unknown message type: tool_progress
+2026-09-17 18:43:10,677 [DEBUG] claude_agent_sdk._internal.query: Read task cancelled
+2026-09-17 18:43:10,781 [DEBUG] excalibur.core.langfuse: Langfuse: flushing and shutting down
