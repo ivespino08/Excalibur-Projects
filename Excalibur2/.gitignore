@@ -152,7 +152,6 @@ ipython_config.py
 
 
 scripts/entrypoint.sh
-scripts/batch_testing_files/run_excalibur_batch.sh
 scripts/batch_testing_files/cve_list.txt
 scripts/batch_testing_files/nohup.out
 scripts/config
