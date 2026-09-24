@@ -65,7 +65,33 @@ setup_ccr() {
         local display_model="localLLM (qwen/qwen3-coder-30b, openai/gpt-oss-20b)"
     fi
 
+    # Validate the generated config BEFORE starting CCR. A malformed config (bad
+    # JSON, or a leftover placeholder because a substitution failed) makes CCR
+    # die on every start — catching it here gives a clear error instead of an
+    # endless crash-restart loop below.
+    if command -v jq >/dev/null 2>&1; then
+        if ! jq -e . "$CCR_CONFIG_FILE" >/dev/null 2>&1; then
+            echo -e "${YELLOW}Error: generated CCR config is not valid JSON: $CCR_CONFIG_FILE${NC}"
+            exit 1
+        fi
+    fi
+    if grep -q "__OPENROUTER_API_KEY__\|__ROUTER_CONFIG__" "$CCR_CONFIG_FILE"; then
+        echo -e "${YELLOW}Error: CCR config still has unsubstituted placeholders: $CCR_CONFIG_FILE${NC}"
+        exit 1
+    fi
+
     echo -e "${BLUE}Starting Claude Code Router...${NC}"
+
+    local ccr_port="${CCR_PORT:-3456}"
+    local ccr_ready_timeout="${CCR_READY_TIMEOUT:-60}"
+
+    # Clear any stale daemon state before starting, so `ccr start` can't be
+    # fooled by a leftover pid/endpoint file from a previous run into thinking a
+    # (now-dead) daemon is still up.
+    ccr stop >/dev/null 2>&1 || true
+    rm -f "${CCR_CONFIG_DIR}/.claude-code-router.pid" \
+          "${CCR_CONFIG_DIR}/.pid" \
+          /tmp/ccr-supervisor.pid 2>/dev/null || true
 
     # Start CCR daemon under a supervised restart loop instead of a bare
     # nohup+&. A bare background process that crashes is gone for the rest
@@ -83,14 +109,30 @@ setup_ccr() {
     ) &
     echo $! > /tmp/ccr-supervisor.pid
 
-    # Wait for CCR to be ready
-    sleep 2
+    # Block until CCR is actually SERVING, not just until a fixed sleep elapses.
+    # We require a real HTTP response on the proxy port (curl returns 0 on any
+    # HTTP reply; non-zero only on connection refused / no server). An open TCP
+    # port can precede the HTTP server being ready, so this is stricter than a
+    # plain nc port check and eliminates the race where work starts too early.
+    ccr_is_serving() {
+        if command -v curl >/dev/null 2>&1; then
+            curl -s -o /dev/null -m 4 "http://127.0.0.1:${ccr_port}/" >/dev/null 2>&1
+        else
+            nc -z 127.0.0.1 "${ccr_port}" >/dev/null 2>&1
+        fi
+    }
 
-    # Check if CCR is running by testing the port
-    if nc -z 127.0.0.1 3456 2>/dev/null; then
-        echo -e "${GREEN}CCR daemon running on port 3456${NC}"
-    else
-        echo -e "${YELLOW}Warning: CCR may not have started properly. Check /tmp/ccr.log${NC}"
+    local waited=0
+    until ccr_is_serving; do
+        if [ "$waited" -ge "$ccr_ready_timeout" ]; then
+            echo -e "${YELLOW}Warning: CCR did not become ready on port ${ccr_port} within ${ccr_ready_timeout}s. Check /tmp/ccr.log${NC}"
+            break
+        fi
+        sleep 2; waited=$((waited+2))
+    done
+
+    if ccr_is_serving; then
+        echo -e "${GREEN}CCR daemon serving on port ${ccr_port} (ready after ${waited}s)${NC}"
     fi
 
     # Add CCR activation to .bashrc so it persists in interactive shells

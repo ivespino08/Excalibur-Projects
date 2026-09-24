@@ -1,0 +1,33 @@
+# Normalize line endings so scripts never get CRLF inside the Linux container.
+# CRLF in a shell script appends stray carriage returns to commands, paths, and
+# the shebang, causing intermittent, hard-to-debug failures. These rules force
+# LF for shell/config files regardless of the contributor's OS or git settings.
+
+# Default: let git handle text normalization automatically.
+* text=auto
+
+# Always LF for anything that runs in the container or as a shell script.
+*.sh            text eol=lf
+*.bash          text eol=lf
+entrypoint.sh   text eol=lf
+config.sh       text eol=lf
+Dockerfile      text eol=lf
+*.dockerfile    text eol=lf
+docker-compose*.yml text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.json          text eol=lf
+*.js            text eol=lf
+*.py            text eol=lf
+Makefile        text eol=lf
+*.env           text eol=lf
+
+# Treat known binaries as binary so git never touches their bytes.
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.pdf    binary
+*.zip    binary
+*.gz     binary
+*.exe    binary

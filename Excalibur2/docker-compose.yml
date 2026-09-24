@@ -14,6 +14,25 @@ services:
       - ccr-config:/home/pentester/.claude-code-router
     stdin_open: true
     tty: true
+    # Run an init process (tini) as PID 1. It reaps zombies from the backgrounded
+    # CCR supervisor loop in entrypoint.sh and forwards signals properly, so
+    # stop/restart are clean and defunct processes don't accumulate.
+    init: true
+    # Auto-restart the container if it exits. A detached interactive-bash
+    # container can occasionally exit right after start (TTY EOF), which is the
+    # "container is not running" case; this brings it back automatically.
+    # NOTE: if bash ever exits *immediately and repeatedly* this becomes a
+    # restart loop — see the keep-alive note below for the durable fix.
+    restart: unless-stopped
+    # Mirror the image HEALTHCHECK here so `docker compose ps` reports health and
+    # you can gate on it. Uses the CCR proxy port; only meaningful in CCR-backed
+    # (openrouter/local) auth modes.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -o /dev/null http://127.0.0.1:${CCR_PORT:-3456}/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 5
     # Required for OpenVPN (HackTheBox/TryHackMe connectivity)
     cap_add:
       - NET_ADMIN

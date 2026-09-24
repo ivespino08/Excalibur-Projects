@@ -430,6 +430,14 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1
 USER root
 RUN poetry config virtualenvs.create false && \
     poetry install --only main && \
+    # Normalize line endings on the copied shell script. If the build context
+    # has it with CRLF (Windows checkout / editor), the container gets \r on
+    # every line, which appends stray carriage returns to commands and paths and
+    # causes intermittent, hard-to-debug failures (and can break the shebang).
+    # Stripping CRs here makes the image correct regardless of the host's
+    # checkout settings. (config.sh runs on the host, so it isn't normalized in
+    # the image — keep it LF in git too; see .gitattributes suggestion.)
+    sed -i 's/\r$//' /home/pentester/entrypoint.sh && \
     chmod +x /home/pentester/entrypoint.sh
 
 # NOTE: intentionally staying as root here (not switching back to
@@ -444,6 +452,17 @@ ENV PYTHONUNBUFFERED=1
 
 # Default working directory for penetration tests
 WORKDIR /workspace
+
+# Healthcheck: the container is "healthy" only once CCR is actually serving on
+# 3456 (a real HTTP reply, not just an open port). This gives `docker ps` a
+# truthful status and lets tooling wait on `docker inspect` health instead of
+# guessing with sleeps. start-period covers the cold-start build-up so early
+# probes don't mark it unhealthy. Only meaningful for the openrouter/local
+# (CCR-backed) auth modes; in manual/anthropic modes CCR isn't started and the
+# container will report unhealthy — harmless, but disable the check there if it
+# bothers you.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=5 \
+    CMD curl -sf -o /dev/null "http://127.0.0.1:${CCR_PORT:-3456}/" || exit 1
 
 # Use entrypoint script for auth setup. Runs as root; entrypoint.sh drops
 # to pentester after fixing volume ownership.
