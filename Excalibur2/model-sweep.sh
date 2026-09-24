@@ -64,6 +64,7 @@ MODELS=(
   "GLM|z-ai/glm-5.3-flash"
   "Gemma|google/gemma-4-26b-a4b-it"
   "Deepseek|deepseek/deepseek-v4-pro"
+  "Anthropic|anthropic/claude-sonnet-4.5"
 )
 
 # ---------------------------------------------------------------------------
